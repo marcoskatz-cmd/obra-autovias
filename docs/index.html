@@ -32,7 +32,11 @@ header .izq{display:flex;align-items:center}
 header small{opacity:.8;font-size:11px}
 .tabs{display:flex;background:#fff;border-bottom:1px solid var(--bd);position:sticky;top:48px;z-index:4}
 .tabs button{flex:1;border:0;background:none;padding:12px 2px;font-size:13px;font-weight:600;color:#6b7280;border-bottom:3px solid transparent}
-.cfg label{margin-top:10px}.cfg .g{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--azul);font-weight:700;margin:18px 0 2px;border-bottom:1px solid var(--bd);padding-bottom:4px}
+.cfg label{margin-top:10px}
+.grp{border:1px solid var(--bd);border-radius:10px;margin-top:10px;background:#fff}.grp summary{padding:14px;font-weight:700;color:var(--azul);cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center}.grp summary::after{content:'›';font-size:22px;transform:rotate(90deg);color:#9ca3af;transition:.2s}.grp[open] summary::after{transform:rotate(-90deg)}.grp summary::-webkit-details-marker{display:none}.grp .in{padding:0 14px 14px}.grp .in label{margin-top:12px}
+.savebar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--bd);padding:10px 14px;display:none;gap:10px;align-items:center;z-index:9;box-shadow:0 -4px 16px rgba(0,0,0,.08)}.savebar.on{display:flex}.savebar span{flex:1;font-size:13px;color:#374151}.savebar .btn{width:auto;margin:0;padding:12px 18px}
+.sub{font-size:11px;color:#6b7280;font-weight:400;margin-left:6px}
+#baseCostos table td:first-child{white-space:normal}#baseCostos tr.tot td{font-weight:700;color:var(--azul);border-top:2px solid var(--bd)}#baseCostos tr.sec td{background:var(--gris);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:#6b7280}.cfg .g{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--azul);font-weight:700;margin:18px 0 2px;border-bottom:1px solid var(--bd);padding-bottom:4px}
 .eq{border:1px solid var(--bd);border-radius:8px;padding:10px;margin-top:10px;background:#fafbfd}.eq .row{margin-top:8px}.eq input,.eq select{padding:10px;font-size:15px}.eq .del{border:0;background:none;color:var(--mal);font-weight:600;font-size:13px;padding:6px 0}
 .eq .sum{font-size:12px;color:#6b7280;margin-top:6px}
 .tabs button.on{color:var(--azul);border-color:var(--azul)}
@@ -84,7 +88,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
 </style>
 </head>
 <body>
-<div id="login"><div class="box"><img src="logo.png" alt="INGECO"><h2>Obra Autovías · Bacheo</h2><p>Seguimiento diario de costo y utilidad</p><label>Tu nombre</label><input type="text" id="lNombre" placeholder="Ej: Agustín" autocomplete="name"><label>PIN</label><input type="password" id="lPin" inputmode="numeric" placeholder="PIN de la obra"><button class="btn" id="bLogin" onclick="login()">Entrar</button></div></div>
+<div id="login"><div class="box"><img src="logo.png" alt="INGECO"><h2>Obra Autovías · Bacheo</h2><p>Seguimiento diario de costo y utilidad</p><label>PIN de la obra</label><input type="password" id="lPin" inputmode="numeric" placeholder="••••" style="text-align:center;letter-spacing:6px;font-size:22px"><button class="btn" id="bLogin" onclick="login()">Entrar</button></div></div>
 <header><div class="izq"><img class="logo" src="logo.png" alt="INGECO"><div><h1>Obra Autovías · Bacheo</h1><small id="who"></small></div></div><div><small id="upd"></small><button id="salir" onclick="salir()">salir</button></div></header>
 <div class="tabs">
   <button class="on" data-t="panel">Panel</button>
@@ -140,19 +144,19 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
 
 <!-- ============ COSTOS ============ -->
 <section id="costos" class="sec">
+  <div class="kpis" id="kpiCostos"></div>
+  <div class="card"><h3>Costos vigentes</h3><div id="baseCostos"></div></div>
   <div class="card cfg">
-    <h3>Parámetros de la obra</h3>
-    <div class="hint">Todo lo que entra en el cálculo. Se guarda en la planilla y recalcula al instante.</div>
+    <h3>Modificar costos</h3>
+    <div class="hint">Tocá un grupo para abrirlo. Los cambios se aplican al guardar y recalculan todo el panel.</div>
     <div id="cfgForm"></div>
+    <details class="grp" id="grpEq"><summary>Equipos alquilados <span class="small" id="eqCount"></span></summary>
+      <div class="hint">Precio mensual de cada equipo; los propios van en 0. Se prorratea por los días laborables del mes.</div>
+      <div id="eqList"></div>
+      <button class="btn sec2" onclick="agregarEquipo()">+ Agregar equipo</button>
+    </details>
   </div>
-  <div class="card cfg">
-    <h3>Equipos alquilados</h3>
-    <div class="hint">Precio mensual de cada equipo. Los propios van en 0. Se prorratea por los días laborables del mes.</div>
-    <div id="eqList"></div>
-    <button class="btn sec2" onclick="agregarEquipo()">+ Agregar equipo</button>
-  </div>
-  <button class="btn" id="bCfg" onclick="guardarConfig()">Guardar costos</button>
-  <div class="card" style="margin-top:14px"><h3>Base de costos resultante</h3><div id="baseCostos" class="small"></div></div>
+  <div class="savebar" id="savebar"><span id="saveMsg">Hay cambios sin guardar</span><button class="btn" id="bCfg" onclick="guardarConfig()">Guardar</button><button class="btn sec2" onclick="descartarConfig()">Descartar</button></div>
 </section>
 
 <!-- ============ AYUDA ============ -->
@@ -166,7 +170,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
       <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
       <dt>Precios y parámetros</dt><dd>Pestaña <b>Costos</b>: tipo de cambio, precio pactado, flete, combustible estimado, personal, puntas, PIN y la lista de equipos alquilados. Todo recalcula al guardar.</dd>
       <dt>Qué muestra el panel</dt><dd><b>Costo/t hoy</b>: costo del último día cargado dividido sus toneladas. <b>Costo/t obra</b>: costo acumulado / toneladas acumuladas. <b>Utilidad</b>: facturación a precio pactado menos costo, sin gastos generales ni IVA.</dd>
-      <dt>Acceso</dt><dd>Con el PIN de la obra (se cambia en Costos) o directo desde la app INGECO. Tu nombre queda registrado en cada carga.</dd>
+      <dt>Acceso</dt><dd>Con el PIN de la obra (se cambia en Costos) o directo desde la app INGECO.</dd>
       <dt>Instalar en el celular</dt><dd>Android: Chrome → menú ⋮ → "Instalar app" / "Agregar a pantalla de inicio". iPhone: Safari → Compartir → "Agregar a inicio".</dd>
     </dl>
   </div>
@@ -177,10 +181,10 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
 <script>
 const API = 'https://script.google.com/macros/s/AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg/exec';
 let D = null, charts = {};
-let CRED = null; // { pin, nombre } o { sesion, nombre }
+let CRED = null; // { pin } o { sesion, nombre }
 function credenciales() {
   if (window.INGECO_SESION) return { sesion: window.INGECO_SESION, nombre: (window.INGECO_USUARIO && (window.INGECO_USUARIO.nombre || window.INGECO_USUARIO.email)) || 'App INGECO' };
-  try { const c = JSON.parse(localStorage.getItem('autovias_cred') || 'null'); if (c && c.pin && c.nombre) return c; } catch (e) {}
+  try { const c = JSON.parse(localStorage.getItem('autovias_cred') || 'null'); if (c && c.pin) return c; } catch (e) {}
   return null;
 }
 async function api(accion, payload) {
@@ -191,16 +195,15 @@ async function api(accion, payload) {
   if (!j.ok) { if (/PIN incorrecto|Sin permiso/.test(j.error || '')) { localStorage.removeItem('autovias_cred'); CRED = null; mostrarLogin(); } throw new Error(j.error || 'Error'); }
   return j.data;
 }
-function mostrarLogin() { document.getElementById('login').classList.add('on'); try { document.getElementById('lNombre').value = localStorage.getItem('autovias_nombre') || ''; } catch (e) {} }
+function mostrarLogin() { document.getElementById('login').classList.add('on'); document.getElementById('lPin').value = ''; setTimeout(() => document.getElementById('lPin').focus(), 100); }
 async function login() {
-  const nombre = document.getElementById('lNombre').value.trim(), pin = document.getElementById('lPin').value.trim();
-  if (!nombre) return toast('Poné tu nombre', 'mal');
+  const pin = document.getElementById('lPin').value.trim();
   if (!pin) return toast('Falta el PIN', 'mal');
   const b = document.getElementById('bLogin'); b.disabled = true; b.textContent = 'Entrando…';
-  CRED = { pin, nombre };
+  CRED = { pin };
   try {
     await api('login');
-    localStorage.setItem('autovias_cred', JSON.stringify(CRED)); localStorage.setItem('autovias_nombre', nombre);
+    localStorage.setItem('autovias_cred', JSON.stringify(CRED));
     document.getElementById('login').classList.remove('on'); cargar();
   } catch (e) { CRED = null; toast(e.message, 'mal'); }
   b.disabled = false; b.textContent = 'Entrar';
@@ -228,7 +231,7 @@ function cargar() {
 
 function render() {
   const s = D.serie, a = D.acum;
-  document.getElementById('who').textContent = D.user;
+  document.getElementById('who').textContent = D.user === 'PIN' ? 'Bacheo con fresado' : D.user;
   document.getElementById('upd').textContent = 'act. ' + new Date().toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
   document.getElementById('fFecha').value = D.hoy; document.getElementById('pFecha').value = D.hoy;
 
@@ -267,16 +270,26 @@ function render() {
 
   // base de costos
   const b = D.base;
+  const dm = b.equiposDia > 0 ? b.equiposMes / b.equiposDia : 22;
+  document.getElementById('kpiCostos').innerHTML = [
+    ['Costo fijo por día', fmtUSD(b.fijoDia + b.combEstUSD), 'equipos + personal + señal. + gasoil est.'],
+    ['Precio pactado', fmtUSD2(D.cfg.PRECIO_T) + '/t', 'sin IVA · TC $ ' + fmtN(D.cfg.TC,0)],
+    ['Flete por viaje', fmtUSD(b.fleteUSD), 'camión de ' + D.cfg.CAP + ' t'],
+    ['Puntas por t', fmtUSD2(b.puntasPorT), 'vida ' + fmtN(b.vidaPuntas,0) + ' t/juego' + (b.vidaReal ? ' (real)' : ' (est.)')],
+  ].map(x => '<div class="kpi"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
   document.getElementById('baseCostos').innerHTML = '<table>' +
-    b.equipos.map(x => '<tr><td>' + x.equipo + '</td><td class="n">' + fmtUSD(x.usdMes) + '/mes</td></tr>').join('') +
-    '<tr><td><b>Equipos por día</b></td><td class="n"><b>' + fmtUSD(b.equiposDia) + '</b></td></tr>' +
-    '<tr><td>Mano de obra</td><td class="n">' + fmtUSD(b.moDia) + '/día</td></tr>' +
-    '<tr><td>Señalización</td><td class="n">' + fmtUSD(b.senalDia) + '/día</td></tr>' +
-    '<tr><td>Combustible estimado (si no hay real)</td><td class="n">' + fmtUSD(b.combEstUSD) + '/día</td></tr>' +
-    '<tr><td>Flete por viaje de ' + D.cfg.CAP + ' t</td><td class="n">' + fmtUSD(b.fleteUSD) + '</td></tr>' +
-    '<tr><td>Puntas por t colocada (vida ' + fmtN(b.vidaPuntas,0) + ' t' + (b.vidaReal ? ', real' : ', estimada') + ')</td><td class="n">' + fmtUSD2(b.puntasPorT) + '</td></tr>' +
-    '<tr><td>Tipo de cambio</td><td class="n">$ ' + fmtN(D.cfg.TC,0) + '</td></tr>' +
-    '<tr><td>Combustible: filtro en planilla de Leandro</td><td class="n">"' + D.cfg.OBRA + '"</td></tr></table>';
+    '<tr class="sec"><td>Equipos alquilados</td><td class="n">por mes</td><td class="n">por día</td></tr>' +
+    b.equipos.map(x => '<tr><td>' + x.equipo + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes) : '<span class="small">propio</span>') + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes / dm) : '') + '</td></tr>').join('') +
+    '<tr class="tot"><td>Equipos (' + fmtN(dm,0) + ' días/mes)</td><td class="n">' + fmtUSD(b.equiposMes) + '</td><td class="n">' + fmtUSD(b.equiposDia) + '</td></tr>' +
+    '<tr class="sec"><td>Otros fijos</td><td></td><td class="n">por día</td></tr>' +
+    '<tr><td>Mano de obra</td><td></td><td class="n">' + fmtUSD(b.moDia) + '</td></tr>' +
+    '<tr><td>Señalización</td><td></td><td class="n">' + fmtUSD(b.senalDia) + '</td></tr>' +
+    '<tr><td>Gasoil estimado <span class="small">(si no hay dato real)</span></td><td></td><td class="n">' + fmtUSD(b.combEstUSD) + '</td></tr>' +
+    '<tr class="tot"><td>Total fijo por día</td><td></td><td class="n">' + fmtUSD(b.fijoDia + b.combEstUSD) + '</td></tr>' +
+    '<tr class="sec"><td>Variables</td><td></td><td></td></tr>' +
+    '<tr><td>Flete por viaje de ' + D.cfg.CAP + ' t</td><td></td><td class="n">' + fmtUSD(b.fleteUSD) + '</td></tr>' +
+    '<tr><td>Puntas por t colocada</td><td></td><td class="n">' + fmtUSD2(b.puntasPorT) + '</td></tr>' +
+    '<tr><td>Gasoil en planilla de Leandro: filtro</td><td></td><td class="n">"' + D.cfg.OBRA + '"</td></tr></table>';
 
   // tablas
   document.getElementById('tDias').innerHTML = '<tr><th>Fecha</th><th class="n">t</th><th class="n">Viajes</th><th class="n">Comb.</th><th class="n">Costo</th><th class="n">Costo/t</th><th class="n">Prom. obra</th><th class="n">Utilidad</th><th class="n">Acum.</th><th>Obs</th><th></th></tr>' +
@@ -316,29 +329,39 @@ const CFG_CAMPOS = [
   ['Puntas de fresadora', 'PUNTAS_VIDA_T', 't fresadas por juego (estimado hasta tener recambios)', 'numeric'],
   ['Acceso', 'PIN', 'PIN de la app', 'text'],
 ];
-let CFG = null, EQ = [];
+let CFG = null, EQ = [], EQ0 = '[]';
+function dirty() {
+  let d = JSON.stringify(EQ) !== EQ0;
+  document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) d = true; });
+  document.getElementById('savebar').classList.toggle('on', d);
+}
+function descartarConfig() { CFG = null; cargarCostos(); }
 function cargarCostos() {
   api('config').then(c => {
     CFG = {}; c.config.forEach(r => CFG[r.clave] = r.valor);
     EQ = c.equipos;
     let h = '', g = '';
     CFG_CAMPOS.forEach(([grupo, k, label, mode]) => {
-      if (grupo !== g) { g = grupo; h += '<div class="g">' + grupo + '</div>'; }
-      h += '<label>' + label + '</label><input data-k="' + k + '" type="' + (mode === 'text' ? 'text' : 'number') + '" ' + (mode === 'text' ? '' : 'inputmode="' + mode + '" step="any" min="0"') + ' value="' + String(CFG[k] == null ? '' : CFG[k]).replace(/"/g, '&quot;') + '">';
+      if (grupo !== g) { if (g) h += '</div></details>'; g = grupo; h += '<details class="grp"><summary>' + grupo + '</summary><div class="in">'; }
+      h += '<label>' + label + '</label><input data-k="' + k + '" type="' + (mode === 'text' ? 'text' : 'number') + '" ' + (mode === 'text' ? '' : 'inputmode="' + mode + '" step="any" min="0"') + ' value="' + String(CFG[k] == null ? '' : CFG[k]).replace(/"/g, '&quot;') + '" oninput="dirty()">';
     });
+    if (g) h += '</div></details>';
     document.getElementById('cfgForm').innerHTML = h;
+    EQ0 = JSON.stringify(EQ);
     renderEquipos();
+    document.getElementById('savebar').classList.remove('on');
   }).catch(e => toast('No se pudo leer la configuración: ' + e.message, 'mal'));
 }
 function renderEquipos() {
+  document.getElementById('eqCount').textContent = EQ.length + ' equipos';
   document.getElementById('eqList').innerHTML = EQ.map((e, i) => '<div class="eq">' +
-    '<input type="text" placeholder="Equipo" value="' + e.equipo.replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].equipo=this.value">' +
-    '<div class="row"><input type="number" inputmode="numeric" min="0" step="any" placeholder="Precio por mes" value="' + e.precio + '" oninput="EQ[' + i + '].precio=this.value;sumEq(' + i + ')">' +
-    '<select onchange="EQ[' + i + '].moneda=this.value;sumEq(' + i + ')"><option' + (e.moneda === 'ARS' ? ' selected' : '') + '>ARS</option><option' + (e.moneda === 'USD' ? ' selected' : '') + '>USD</option></select>' +
-    '<select onchange="EQ[' + i + '].conIva=Number(this.value);sumEq(' + i + ')"><option value="0"' + (e.conIva ? '' : ' selected') + '>sin IVA</option><option value="1"' + (e.conIva ? ' selected' : '') + '>con IVA</option></select></div>' +
-    '<input type="text" placeholder="Observación (opcional)" value="' + (e.obs || '').replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].obs=this.value" style="margin-top:8px">' +
+    '<label style="margin-top:0">Equipo</label><input type="text" placeholder="Nombre del equipo" value="' + e.equipo.replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].equipo=this.value;dirty()">' +
+    '<div class="row"><div><label>Precio por mes</label><input type="number" inputmode="numeric" min="0" step="any" placeholder="0 = propio" value="' + e.precio + '" oninput="EQ[' + i + '].precio=this.value;sumEq(' + i + ');dirty()"></div>' +
+    '<div style="flex:.6"><label>Moneda</label><select onchange="EQ[' + i + '].moneda=this.value;sumEq(' + i + ');dirty()"><option' + (e.moneda === 'ARS' ? ' selected' : '') + '>ARS</option><option' + (e.moneda === 'USD' ? ' selected' : '') + '>USD</option></select></div>' +
+    '<div style="flex:.8"><label>IVA</label><select onchange="EQ[' + i + '].conIva=Number(this.value);sumEq(' + i + ');dirty()"><option value="0"' + (e.conIva ? '' : ' selected') + '>sin IVA</option><option value="1"' + (e.conIva ? ' selected' : '') + '>incluido</option></select></div></div>' +
+    '<label>Observación <span class="small">(opcional)</span></label><input type="text" value="' + (e.obs || '').replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].obs=this.value;dirty()">' +
     '<div class="sum" id="eqSum' + i + '"></div>' +
-    '<button class="del" onclick="EQ.splice(' + i + ',1);renderEquipos()">Quitar</button></div>').join('');
+    '<button class="del" onclick="EQ.splice(' + i + ',1);renderEquipos();dirty()">Quitar equipo</button></div>').join('');
   EQ.forEach((e, i) => sumEq(i));
 }
 function sumEq(i) {
@@ -346,17 +369,18 @@ function sumEq(i) {
   let usd = e.moneda === 'USD' ? Number(e.precio) : Number(e.precio) / tc; if (Number(e.conIva) === 1) usd = usd / (1 + iva);
   const el = document.getElementById('eqSum' + i); if (el) el.textContent = usd > 0 ? '= ' + fmtUSD(usd) + '/mes · ' + fmtUSD(usd / dm) + '/día' : 'propio / sin costo';
 }
-function agregarEquipo() { EQ.push({ equipo: '', precio: 0, moneda: 'ARS', conIva: 0, obs: '' }); renderEquipos(); window.scrollTo(0, document.getElementById('eqList').getBoundingClientRect().bottom + window.scrollY - 200); }
+function agregarEquipo() { EQ.push({ equipo: '', precio: 0, moneda: 'ARS', conIva: 0, obs: '' }); renderEquipos(); dirty(); const l = document.querySelectorAll('.eq'); l[l.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' }); l[l.length - 1].querySelector('input').focus(); }
 function guardarConfig() {
   const config = {};
   document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) config[i.dataset.k] = i.value; });
   if (config.PIN !== undefined && !confirm('¿Cambiar el PIN de acceso? Todos van a tener que volver a entrar con el nuevo.')) return;
   const b = document.getElementById('bCfg'); b.disabled = true; b.textContent = 'Guardando…';
   api('guardarConfig', { config, equipos: EQ }).then(() => {
+    CFG = null;
     toast('Costos guardados', 'ok');
     if (config.PIN !== undefined && CRED && CRED.pin) { CRED.pin = String(config.PIN).trim(); localStorage.setItem('autovias_cred', JSON.stringify(CRED)); }
     cargarCostos(); cargar();
-  }).catch(e => toast(e.message, 'mal')).finally(() => { b.disabled = false; b.textContent = 'Guardar costos'; });
+  }).catch(e => toast(e.message, 'mal')).finally(() => { b.disabled = false; b.textContent = 'Guardar'; });
 }
 
 function mk(id, cfg) { if (charts[id]) charts[id].destroy(); cfg.options = Object.assign({responsive:true, maintainAspectRatio:false, animation:false}, cfg.options||{}); charts[id] = new Chart(document.getElementById(id), cfg); }

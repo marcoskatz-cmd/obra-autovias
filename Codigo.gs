@@ -62,8 +62,7 @@ function autorizar_(body) {
   const cfg = leerConfig_();
   const pin = String(cfg.PIN === undefined || cfg.PIN === '' ? '1234' : cfg.PIN).trim();
   if (String(body.pin || '').trim() !== pin) throw new Error('PIN incorrecto');
-  if (!nombre) throw new Error('Falta el nombre');
-  return nombre;
+  return nombre || 'PIN';
 }
 
 // Sesión de módulo emitida por app-ingeco al canjear el ticket (guard.js). Se cachea 10 min.
