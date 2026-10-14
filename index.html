@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Seguimiento Autovías</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--azul:#2A3D7C;--azul2:#3f57a6;--gris:#eef1f8;--txt:#1f2430;--ok:#1e8449;--mal:#c0392b;--warn:#b9770e;--bd:#d5d9e3}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#f6f7fb;color:var(--txt);font-size:15px}
+header{background:var(--azul);color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.3px}
+header small{opacity:.8;font-size:11px}
+.tabs{display:flex;background:#fff;border-bottom:1px solid var(--bd);position:sticky;top:48px;z-index:4}
+.tabs button{flex:1;border:0;background:none;padding:12px 4px;font-size:14px;font-weight:600;color:#6b7280;border-bottom:3px solid transparent}
+.tabs button.on{color:var(--azul);border-color:var(--azul)}
+main{padding:14px;max-width:960px;margin:0 auto}
+.sec{display:none}.sec.on{display:block}
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
+@media(min-width:700px){.kpis{grid-template-columns:repeat(4,1fr)}}
+.kpi{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:12px}
+.kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;font-weight:600}
+.kpi .v{font-size:24px;font-weight:700;margin-top:4px;color:var(--azul)}
+.kpi .s{font-size:12px;color:#6b7280;margin-top:2px}
+.kpi.ok .v{color:var(--ok)}.kpi.mal .v{color:var(--mal)}
+.card{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:14px;color:var(--azul)}
+canvas{width:100%!important;max-height:260px}
+.aviso{border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.aviso.warn{background:#fff6e5;border:1px solid #f0c36d;color:#7a4e00}
+.aviso.mal{background:#fdecea;border:1px solid #f1a6a0;color:#7b1d14}
+.aviso.ok{background:#e9f7ef;border:1px solid #9fd9b5;color:#145a32}
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
+input,textarea,select{width:100%;padding:12px;border:1px solid var(--bd);border-radius:8px;font-size:16px;font-family:inherit}
+input:focus,textarea:focus{outline:2px solid var(--azul2);border-color:var(--azul2)}
+.row{display:flex;gap:10px}.row>*{flex:1}
+.hint{font-size:12px;color:#6b7280;margin-top:4px}
+.btn{width:100%;padding:14px;border:0;border-radius:8px;background:var(--azul);color:#fff;font-size:16px;font-weight:700;margin-top:16px}
+.btn:disabled{opacity:.5}
+.btn.sec2{background:#fff;color:var(--azul);border:1px solid var(--azul)}
+.btn.rojo{background:var(--mal)}
+.toggle{display:flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.toggle button{flex:1;padding:12px;border:0;background:#fff;font-size:15px;font-weight:600;color:#6b7280}
+.toggle button.on{background:var(--azul);color:#fff}
+.preview{background:var(--gris);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:13px;line-height:1.6}
+.preview b{color:var(--azul)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--azul);color:#fff;padding:8px 6px;text-align:left;font-weight:600;white-space:nowrap}
+td{padding:8px 6px;border-bottom:1px solid var(--bd);white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfd}
+td.n,th.n{text-align:right}
+.pos{color:var(--ok);font-weight:600}.neg{color:var(--mal);font-weight:600}
+.tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:10px;background:#e5e7eb;color:#374151;margin-left:4px}
+.tag.est{background:#fff6e5;color:#7a4e00}
+.tbl{overflow-x:auto}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2430;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;opacity:0;transition:.3s;pointer-events:none;z-index:20;max-width:90%}
+.toast.on{opacity:1}
+.toast.ok{background:var(--ok)}.toast.mal{background:var(--mal)}
+.loading{text-align:center;padding:40px;color:#6b7280}
+dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin:2px 0 0 0;color:#374151;line-height:1.5}
+.small{font-size:12px;color:#6b7280}
+</style>
+</head>
+<body>
+<header><div><h1>Obra Autovías · Bacheo</h1><small id="who"></small></div><small id="upd"></small></header>
+<div class="tabs">
+  <button class="on" data-t="panel">Panel</button>
+  <button data-t="carga">Cargar día</button>
+  <button data-t="dias">Días</button>
+  <button data-t="ayuda">Ayuda</button>
+</div>
+<main>
+
+<!-- ============ PANEL ============ -->
+<section id="panel" class="sec on">
+  <div id="avisos"></div>
+  <div class="kpis" id="kpis"><div class="loading">Cargando…</div></div>
+  <div class="card"><h3>Costo por tonelada — diario vs. promedio de obra</h3><canvas id="chCosto"></canvas></div>
+  <div class="card"><h3>Utilidad diaria y acumulada (USD)</h3><canvas id="chUtil"></canvas></div>
+  <div class="card"><h3>Toneladas por día</h3><canvas id="chT"></canvas></div>
+  <div class="card"><h3>Estructura del costo acumulado</h3><div id="estructura" class="small"></div></div>
+</section>
+
+<!-- ============ CARGA ============ -->
+<section id="carga" class="sec">
+  <div class="card">
+    <h3>Producción del día</h3>
+    <label>Fecha</label><input type="date" id="fFecha">
+    <label>¿Trabajó la cuadrilla?</label>
+    <div class="toggle"><button id="jSi" class="on">Sí, jornada normal</button><button id="jNo">No (lluvia / parada)</button></div>
+    <div class="hint">Si no trabajó, no se imputan equipos ni personal ese día. Si trabajó pero no colocó, cargá 0 t: los fijos corren igual.</div>
+    <label>Toneladas colocadas</label><input type="number" id="fT" inputmode="decimal" min="0" max="500" step="0.5" placeholder="Ej: 60">
+    <label>Viajes de mezcla <span class="small">(se calcula solo; corregí si el fletero facturó distinto)</span></label>
+    <input type="number" id="fV" inputmode="numeric" min="0" max="20" step="1" placeholder="auto">
+    <label>Observaciones <span class="small">(opcional)</span></label><textarea id="fObs" rows="2" placeholder="Frente, interrupciones, demoras de planta…"></textarea>
+    <div class="preview" id="prev"></div>
+    <button class="btn" id="bGuardar" onclick="guardar()">Guardar día</button>
+  </div>
+  <div class="card">
+    <h3>Recambio de puntas de fresadora</h3>
+    <div class="hint">Cargá cada vez que se compra/instala un juego. Con dos o más recambios, la vida útil real reemplaza al estimado.</div>
+    <div class="row"><div><label>Fecha</label><input type="date" id="pFecha"></div><div><label>Juegos</label><input type="number" id="pJ" inputmode="numeric" min="1" max="10" step="1" value="1"></div></div>
+    <label>Observaciones</label><input type="text" id="pObs" placeholder="Ej: cambio completo, 200 puntas">
+    <button class="btn sec2" onclick="guardarPuntas()">Registrar recambio</button>
+  </div>
+</section>
+
+<!-- ============ DÍAS ============ -->
+<section id="dias" class="sec">
+  <div class="card tbl"><h3>Detalle por día</h3><table id="tDias"></table></div>
+  <div class="card tbl"><h3>Recambios de puntas</h3><table id="tPuntas"></table></div>
+</section>
+
+<!-- ============ AYUDA ============ -->
+<section id="ayuda" class="sec">
+  <div class="card">
+    <h3>Cómo se usa</h3>
+    <dl>
+      <dt>Todos los días, al cierre</dt><dd>Pestaña <b>Cargar día</b>: fecha, toneladas colocadas y guardar. Si cargás dos veces la misma fecha, se reemplaza el dato anterior.</dd>
+      <dt>Viajes de mezcla</dt><dd>Se calculan solos (1 viaje cada 30 t, redondeando para arriba). Si el fletero facturó otra cantidad, corregilo en el campo.</dd>
+      <dt>Combustible</dt><dd>Se lee automáticamente de la planilla de entregas de Leandro Casares, filtrando por la obra. Los días sin carga real usan el estimado de CONFIG y se marcan con <span class="tag est">estimado</span>.</dd>
+      <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
+      <dt>Precios y parámetros</dt><dd>Se editan en la planilla, pestaña CONFIG y EQUIPOS (tipo de cambio, alquileres, precio pactado, flete). Todo recalcula al recargar.</dd>
+      <dt>Qué muestra el panel</dt><dd><b>Costo/t hoy</b>: costo del último día cargado dividido sus toneladas. <b>Costo/t obra</b>: costo acumulado / toneladas acumuladas. <b>Utilidad</b>: facturación a precio pactado menos costo, sin gastos generales ni IVA.</dd>
+      <dt>Acceso</dt><dd>Solo los mails listados en CONFIG > ACCESO pueden entrar.</dd>
+    </dl>
+  </div>
+  <div class="card"><h3>Base de costos vigente</h3><div id="baseCostos" class="small"></div></div>
+</section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+let D = null, charts = {};
+const fmtUSD = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-AR', {maximumFractionDigits:0});
+const fmtUSD2 = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-AR', {minimumFractionDigits:1, maximumFractionDigits:1});
+const fmtN = (v, d=1) => v == null ? '—' : Number(v).toLocaleString('es-AR', {maximumFractionDigits:d});
+const fDia = s => { const [y,m,d] = s.split('-'); return d + '/' + m; };
+const fDiaL = s => { const [y,m,d] = s.split('-'); return d + '/' + m + '/' + y.slice(2); };
+
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('on')); b.classList.add('on');
+  document.querySelectorAll('.sec').forEach(s => s.classList.remove('on')); document.getElementById(b.dataset.t).classList.add('on');
+});
+
+function toast(msg, tipo) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast on ' + (tipo||''); setTimeout(() => t.className = 'toast', 3200); }
+
+function cargar() {
+  google.script.run.withSuccessHandler(d => { D = d; render(); }).withFailureHandler(e => toast('Error al cargar: ' + e.message, 'mal')).getDatos();
+}
+
+function render() {
+  const s = D.serie, a = D.acum;
+  document.getElementById('who').textContent = D.user;
+  document.getElementById('upd').textContent = 'act. ' + new Date().toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
+  document.getElementById('fFecha').value = D.hoy; document.getElementById('pFecha').value = D.hoy;
+
+  // avisos
+  let av = '';
+  if (!D.combustible.ok) av += '<div class="aviso warn">⚠ ' + D.combustible.msg + '</div>';
+  const sinComb = s.filter(x => !x.combReal && x.jornada).length;
+  if (D.combustible.ok && sinComb) av += '<div class="aviso warn">' + sinComb + ' día(s) sin carga real de combustible: se usa el estimado.</div>';
+  if (!D.base.vidaReal) av += '<div class="aviso warn">Vida de puntas estimada (' + fmtN(D.base.vidaPuntas,0) + ' t por juego). Registrá los recambios para calibrarla.</div>';
+  document.getElementById('avisos').innerHTML = av;
+
+  // KPIs
+  const ult = s.length ? s[s.length-1] : null;
+  const costoObra = a.t > 0 ? a.costo / a.t : null;
+  const utilObra = a.fact - a.costo;
+  const utilProm = a.dias ? utilObra / a.dias : null;
+  const tProm = a.dias ? a.t / a.dias : null;
+  const margen = a.fact > 0 ? utilObra / a.fact : null;
+  const k = [
+    ['Costo/t último día', ult ? fmtUSD2(ult.costoT) : '—', ult ? fDiaL(ult.fecha) + ' · ' + fmtN(ult.t,1) + ' t' : 'sin datos', ult && ult.costoT != null ? (ult.costoT <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
+    ['Costo/t promedio obra', fmtUSD2(costoObra), a.t ? fmtN(a.t,0) + ' t en ' + a.dias + ' días' : '', costoObra != null ? (costoObra <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
+    ['Utilidad último día', ult ? fmtUSD(ult.utilidad) : '—', 'precio ' + fmtUSD2(D.cfg.PRECIO_T) + '/t', ult ? (ult.utilidad >= 0 ? 'ok' : 'mal') : ''],
+    ['Utilidad promedio/día', fmtUSD(utilProm), 'acumulada ' + fmtUSD(utilObra), utilProm != null ? (utilProm >= 0 ? 'ok' : 'mal') : ''],
+    ['Toneladas promedio/día', fmtN(tProm,1), 'total ' + fmtN(a.t,0) + ' t', ''],
+    ['Margen sobre facturación', margen == null ? '—' : fmtN(margen*100,1) + '%', 'facturado ' + fmtUSD(a.fact), margen != null ? (margen >= 0.1 ? 'ok' : margen >= 0 ? '' : 'mal') : ''],
+    ['Punto de equilibrio', fmtN((D.base.fijoDia + D.base.combEstUSD) / (D.cfg.PRECIO_T - D.base.puntasPorT - D.base.fleteUSD / D.cfg.CAP),0) + ' t/día', 'con combustible estimado y flete prorrateado', ''],
+    ['Costo fijo diario', fmtUSD(D.base.fijoDia + D.base.combEstUSD), 'equipos + MO + señal. + comb. est.', ''],
+  ];
+  document.getElementById('kpis').innerHTML = k.map(x => '<div class="kpi ' + x[3] + '"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
+
+  // estructura
+  if (a.costo > 0) {
+    const e = [['Alquiler de equipos + MO + señalización', a.fijos], ['Combustible', a.comb], ['Flete de mezcla', a.flete], ['Puntas', a.puntas]];
+    document.getElementById('estructura').innerHTML = '<table>' + e.map(x => '<tr><td>' + x[0] + '</td><td class="n">' + fmtUSD(x[1]) + '</td><td class="n">' + fmtN(x[1]/a.costo*100,1) + '%</td></tr>').join('') + '<tr><td><b>Total</b></td><td class="n"><b>' + fmtUSD(a.costo) + '</b></td><td class="n">100%</td></tr></table>';
+  } else document.getElementById('estructura').textContent = 'Sin días cargados todavía.';
+
+  // base de costos
+  const b = D.base;
+  document.getElementById('baseCostos').innerHTML = '<table>' +
+    b.equipos.map(x => '<tr><td>' + x.equipo + '</td><td class="n">' + fmtUSD(x.usdMes) + '/mes</td></tr>').join('') +
+    '<tr><td><b>Equipos por día</b></td><td class="n"><b>' + fmtUSD(b.equiposDia) + '</b></td></tr>' +
+    '<tr><td>Mano de obra</td><td class="n">' + fmtUSD(b.moDia) + '/día</td></tr>' +
+    '<tr><td>Señalización</td><td class="n">' + fmtUSD(b.senalDia) + '/día</td></tr>' +
+    '<tr><td>Combustible estimado (si no hay real)</td><td class="n">' + fmtUSD(b.combEstUSD) + '/día</td></tr>' +
+    '<tr><td>Flete por viaje de ' + D.cfg.CAP + ' t</td><td class="n">' + fmtUSD(b.fleteUSD) + '</td></tr>' +
+    '<tr><td>Puntas por t colocada (vida ' + fmtN(b.vidaPuntas,0) + ' t' + (b.vidaReal ? ', real' : ', estimada') + ')</td><td class="n">' + fmtUSD2(b.puntasPorT) + '</td></tr>' +
+    '<tr><td>Tipo de cambio</td><td class="n">$ ' + fmtN(D.cfg.TC,0) + '</td></tr>' +
+    '<tr><td>Combustible: filtro en planilla de Leandro</td><td class="n">"' + D.cfg.OBRA + '"</td></tr></table>';
+
+  // tablas
+  document.getElementById('tDias').innerHTML = '<tr><th>Fecha</th><th class="n">t</th><th class="n">Viajes</th><th class="n">Comb.</th><th class="n">Costo</th><th class="n">Costo/t</th><th class="n">Prom. obra</th><th class="n">Utilidad</th><th class="n">Acum.</th><th>Obs</th><th></th></tr>' +
+    [...s].reverse().map(x => '<tr><td>' + fDiaL(x.fecha) + (x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combReal ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button onclick="editar(\'' + x.fecha + '\')" style="border:0;background:none;color:var(--azul);font-weight:600">editar</button></td></tr>').join('');
+  document.getElementById('tPuntas').innerHTML = '<tr><th>Fecha</th><th class="n">Juegos</th><th>Obs</th></tr>' + (D.recambios.length ? D.recambios.map(r => '<tr><td>' + fDiaL(r.fecha) + '</td><td class="n">' + r.juegos + '</td><td>' + (r.obs||'') + '</td></tr>').join('') : '<tr><td colspan="3" class="small">Sin recambios registrados.</td></tr>');
+
+  // charts
+  const lbl = s.map(x => fDia(x.fecha));
+  mk('chCosto', { type:'line', data:{ labels:lbl, datasets:[
+    { label:'Costo/t del día', data:s.map(x=>x.costoT), borderColor:'#2A3D7C', backgroundColor:'#2A3D7C', tension:.2, pointRadius:3 },
+    { label:'Promedio obra', data:s.map(x=>x.acumCostoT), borderColor:'#3f57a6', borderDash:[6,4], pointRadius:0, tension:.2 },
+    { label:'Precio pactado', data:s.map(()=>D.cfg.PRECIO_T), borderColor:'#1e8449', pointRadius:0, borderWidth:2 } ]},
+    options:{ plugins:{legend:{position:'bottom'}}, scales:{y:{title:{display:true,text:'USD/t'}}} } });
+  mk('chUtil', { data:{ labels:lbl, datasets:[
+    { type:'bar', label:'Utilidad del día', data:s.map(x=>x.utilidad), backgroundColor:s.map(x=>x.utilidad>=0?'#27ae60':'#c0392b') },
+    { type:'line', label:'Acumulada', data:s.map(x=>x.acumUtil), borderColor:'#2A3D7C', yAxisID:'y2', pointRadius:0, tension:.2 } ]},
+    options:{ plugins:{legend:{position:'bottom'}}, scales:{ y:{title:{display:true,text:'USD/día'}}, y2:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'USD acum.'}} } } });
+  mk('chT', { type:'bar', data:{ labels:lbl, datasets:[{ label:'t colocadas', data:s.map(x=>x.t), backgroundColor:'#3f57a6' }]},
+    options:{ plugins:{legend:{display:false}} } });
+  preview();
+}
+function mk(id, cfg) { if (charts[id]) charts[id].destroy(); cfg.options = Object.assign({responsive:true, maintainAspectRatio:false, animation:false}, cfg.options||{}); charts[id] = new Chart(document.getElementById(id), cfg); }
+
+// ---------- carga ----------
+let jornada = 1;
+document.getElementById('jSi').onclick = () => setJ(1); document.getElementById('jNo').onclick = () => setJ(0);
+function setJ(v) { jornada = v; document.getElementById('jSi').classList.toggle('on', v===1); document.getElementById('jNo').classList.toggle('on', v===0); if (!v) { document.getElementById('fT').value = 0; } preview(); }
+['fT','fV','fFecha'].forEach(id => document.getElementById(id).addEventListener('input', preview));
+
+function preview() {
+  if (!D) return;
+  const t = Number(document.getElementById('fT').value) || 0;
+  const vIn = document.getElementById('fV').value;
+  const viajes = vIn === '' ? Math.ceil(t / D.cfg.CAP) : Number(vIn);
+  document.getElementById('fV').placeholder = 'auto: ' + Math.ceil(t / D.cfg.CAP);
+  const fijos = jornada ? D.base.fijoDia : 0;
+  const comb = jornada ? D.base.combEstUSD : 0;
+  const flete = viajes * D.base.fleteUSD, puntas = t * D.base.puntasPorT;
+  const costo = fijos + comb + flete + puntas, fact = t * D.cfg.PRECIO_T, u = fact - costo;
+  const f = document.getElementById('fFecha').value;
+  const existe = D.serie.find(x => x.fecha === f);
+  let resto = t % D.cfg.CAP;
+  let advFlete = (t > 0 && resto > 0 && resto <= 5 && vIn === '') ? '<br>⚠ Con ' + t + ' t pagás ' + viajes + ' viajes: el último lleva solo ' + fmtN(resto,1) + ' t.' : '';
+  document.getElementById('prev').innerHTML =
+    (existe ? '<b>Ya hay carga para esta fecha (' + fmtN(existe.t,1) + ' t). Al guardar se reemplaza.</b><br>' : '') +
+    'Costo estimado del día: <b>' + fmtUSD(costo) + '</b> · ' + fmtUSD2(t > 0 ? costo/t : null) + '/t<br>' +
+    'Facturación: <b>' + fmtUSD(fact) + '</b> · Utilidad: <b class="' + (u>=0?'pos':'neg') + '">' + fmtUSD(u) + '</b>' +
+    '<br><span class="small">Combustible estimado; se reemplaza por el real cuando Leandro cargue las entregas.</span>' + advFlete;
+}
+
+function guardar() {
+  const fecha = document.getElementById('fFecha').value, t = document.getElementById('fT').value;
+  if (!fecha) return toast('Falta la fecha', 'mal');
+  if (t === '' ) return toast('Falta la cantidad de toneladas', 'mal');
+  if (fecha > D.hoy) return toast('No se puede cargar una fecha futura', 'mal');
+  const b = document.getElementById('bGuardar'); b.disabled = true; b.textContent = 'Guardando…';
+  google.script.run.withSuccessHandler(r => {
+    b.disabled = false; b.textContent = 'Guardar día';
+    toast(r.editado ? 'Día actualizado' : 'Día guardado', 'ok');
+    document.getElementById('fT').value = ''; document.getElementById('fV').value = ''; document.getElementById('fObs').value = ''; setJ(1);
+    cargar();
+  }).withFailureHandler(e => { b.disabled = false; b.textContent = 'Guardar día'; toast(e.message, 'mal'); })
+  .guardarDia({ fecha, t, viajes: document.getElementById('fV').value, obs: document.getElementById('fObs').value, jornada });
+}
+function guardarPuntas() {
+  const fecha = document.getElementById('pFecha').value, juegos = document.getElementById('pJ').value;
+  if (!fecha || !juegos) return toast('Completá fecha y cantidad', 'mal');
+  google.script.run.withSuccessHandler(() => { toast('Recambio registrado', 'ok'); document.getElementById('pObs').value = ''; cargar(); })
+    .withFailureHandler(e => toast(e.message, 'mal')).guardarPuntas({ fecha, juegos, obs: document.getElementById('pObs').value });
+}
+function editar(fecha) {
+  const x = D.serie.find(s => s.fecha === fecha); if (!x) return;
+  document.getElementById('fFecha').value = fecha; document.getElementById('fT').value = x.t; document.getElementById('fV').value = x.viajes; document.getElementById('fObs').value = x.obs || ''; setJ(x.jornada);
+  document.querySelector('.tabs button[data-t=carga]').click(); window.scrollTo(0,0);
+}
+
+cargar();
+setInterval(cargar, 5*60*1000);
+</script>
+</body>
+</html>
