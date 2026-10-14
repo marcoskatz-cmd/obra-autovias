@@ -43,7 +43,7 @@ function setup() {
   cfg.getRange(1, 1, 1, 3).setValues([['CLAVE', 'VALOR', 'DESCRIPCIÓN']]).setFontWeight('bold');
   const rows = [
     ['ACCESO', 'marcoskatz@grupoingeco.com.ar, agustin@grupoingeco.com.ar', 'Mails con acceso, separados por coma'],
-    ['OBRA_COMBUSTIBLE', 'Autovías', 'Texto con que Leandro identifica esta obra en la columna OBRA GENERAL (o LUGAR ENTREGA)'],
+    ['OBRA_COMBUSTIBLE', 'autovia del noa', 'Texto con que Leandro identifica esta obra en la columna OBRA GENERAL (o LUGAR ENTREGA)'],
     ['TC', 1540, 'Tipo de cambio $/USD'],
     ['IVA', 0.21, 'IVA para netear'],
     ['COMB_CON_IVA', 1, '1 si el precio de la planilla de combustible incluye IVA'],
@@ -56,7 +56,7 @@ function setup() {
     ['MO_USD', 705, 'USD/día mano de obra (12 personas)'],
     ['SENAL_USD', 333, 'USD/día señalización'],
     ['PUNTAS_JUEGO_ARS', 6134000, '$ juego de 200 puntas CON IVA'],
-    ['PUNTAS_VIDA_T', 3200, 't fresadas por juego (estimado; se recalcula con recambios reales)'],
+    ['PUNTAS_VIDA_T', 1400, 't fresadas por juego = 200 puntas × 7 t/punta (estimado; se recalcula con recambios reales)'],
   ];
   cfg.getRange(2, 1, rows.length, 3).setValues(rows);
   cfg.setColumnWidths(1, 1, 180); cfg.setColumnWidth(2, 320); cfg.setColumnWidth(3, 420);
