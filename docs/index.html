@@ -3,14 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Seguimiento Autovías</title>
+<title>Obra Autovías · INGECO</title>
+<meta name="theme-color" content="#2A3D7C">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="https://marcoskatz-cmd.github.io/app-ingeco/guard.js" data-modulo="AUTOVIAS"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-:root{--azul:#2A3D7C;--azul2:#3f57a6;--gris:#eef1f8;--txt:#1f2430;--ok:#1e8449;--mal:#c0392b;--warn:#b9770e;--bd:#d5d9e3}
+:root{--azul:#2A3D7C;--azul2:#3f57a6;--gris:#eef1f8;--txt:#1f2430;--ok:#0f766e;--mal:#c0392b;--warn:#b9770e;--bd:#d5d9e3}
 *{box-sizing:border-box}
 body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#f6f7fb;color:var(--txt);font-size:15px}
 header{background:var(--azul);color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:5}
 header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.3px}
+header .logo{height:30px;width:auto;margin-right:10px;background:#fff;border-radius:6px;padding:3px}
+header .izq{display:flex;align-items:center}
+#login{position:fixed;inset:0;background:#f6f7fb;z-index:50;display:none;align-items:center;justify-content:center;padding:20px}
+#login.on{display:flex}
+#login .box{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:24px;width:100%;max-width:360px;text-align:center}
+#login img{height:56px;margin-bottom:8px}
+#login h2{margin:0 0 4px;font-size:18px;color:var(--azul)}
+#login p{margin:0 0 8px;font-size:13px;color:#6b7280}
+#login label{text-align:left}
+#salir{border:0;background:none;color:#fff;opacity:.8;font-size:12px;margin-left:10px}
 header small{opacity:.8;font-size:11px}
 .tabs{display:flex;background:#fff;border-bottom:1px solid var(--bd);position:sticky;top:48px;z-index:4}
 .tabs button{flex:1;border:0;background:none;padding:12px 4px;font-size:14px;font-weight:600;color:#6b7280;border-bottom:3px solid transparent}
@@ -30,7 +47,7 @@ canvas{width:100%!important;max-height:260px}
 .aviso{border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .aviso.warn{background:#fff6e5;border:1px solid #f0c36d;color:#7a4e00}
 .aviso.mal{background:#fdecea;border:1px solid #f1a6a0;color:#7b1d14}
-.aviso.ok{background:#e9f7ef;border:1px solid #9fd9b5;color:#145a32}
+.aviso.ok{background:#e6f4f3;border:1px solid #8fcfc9;color:#0b5a54}
 label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
 input,textarea,select{width:100%;padding:12px;border:1px solid var(--bd);border-radius:8px;font-size:16px;font-family:inherit}
 input:focus,textarea:focus{outline:2px solid var(--azul2);border-color:var(--azul2)}
@@ -63,7 +80,8 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
 </style>
 </head>
 <body>
-<header><div><h1>Obra Autovías · Bacheo</h1><small id="who"></small></div><small id="upd"></small></header>
+<div id="login"><div class="box"><img src="logo.png" alt="INGECO"><h2>Obra Autovías · Bacheo</h2><p>Seguimiento diario de costo y utilidad</p><label>Tu nombre</label><input type="text" id="lNombre" placeholder="Ej: Agustín" autocomplete="name"><label>PIN</label><input type="password" id="lPin" inputmode="numeric" placeholder="PIN de la obra"><button class="btn" id="bLogin" onclick="login()">Entrar</button></div></div>
+<header><div class="izq"><img class="logo" src="logo.png" alt="INGECO"><div><h1>Obra Autovías · Bacheo</h1><small id="who"></small></div></div><div><small id="upd"></small><button id="salir" onclick="salir()">salir</button></div></header>
 <div class="tabs">
   <button class="on" data-t="panel">Panel</button>
   <button data-t="carga">Cargar día</button>
@@ -123,7 +141,8 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
       <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
       <dt>Precios y parámetros</dt><dd>Se editan en la planilla, pestaña CONFIG y EQUIPOS (tipo de cambio, alquileres, precio pactado, flete). Todo recalcula al recargar.</dd>
       <dt>Qué muestra el panel</dt><dd><b>Costo/t hoy</b>: costo del último día cargado dividido sus toneladas. <b>Costo/t obra</b>: costo acumulado / toneladas acumuladas. <b>Utilidad</b>: facturación a precio pactado menos costo, sin gastos generales ni IVA.</dd>
-      <dt>Acceso</dt><dd>Solo los mails listados en CONFIG > ACCESO pueden entrar.</dd>
+      <dt>Acceso</dt><dd>Con el PIN de la obra (fila PIN de CONFIG) o directo desde la app INGECO. Tu nombre queda registrado en cada carga.</dd>
+      <dt>Instalar en el celular</dt><dd>Android: Chrome → menú ⋮ → "Instalar app" / "Agregar a pantalla de inicio". iPhone: Safari → Compartir → "Agregar a inicio".</dd>
     </dl>
   </div>
   <div class="card"><h3>Base de costos vigente</h3><div id="baseCostos" class="small"></div></div>
@@ -132,7 +151,38 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
 <div class="toast" id="toast"></div>
 
 <script>
+const API = 'https://script.google.com/macros/s/AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg/exec';
 let D = null, charts = {};
+let CRED = null; // { pin, nombre } o { sesion, nombre }
+function credenciales() {
+  if (window.INGECO_SESION) return { sesion: window.INGECO_SESION, nombre: (window.INGECO_USUARIO && (window.INGECO_USUARIO.nombre || window.INGECO_USUARIO.email)) || 'App INGECO' };
+  try { const c = JSON.parse(localStorage.getItem('autovias_cred') || 'null'); if (c && c.pin && c.nombre) return c; } catch (e) {}
+  return null;
+}
+async function api(accion, payload) {
+  const cred = CRED || credenciales();
+  if (!cred) throw new Error('Sin credenciales');
+  const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ accion, payload: payload || {} }, cred)) });
+  const j = await r.json();
+  if (!j.ok) { if (/PIN incorrecto|Sin permiso/.test(j.error || '')) { localStorage.removeItem('autovias_cred'); CRED = null; mostrarLogin(); } throw new Error(j.error || 'Error'); }
+  return j.data;
+}
+function mostrarLogin() { document.getElementById('login').classList.add('on'); try { document.getElementById('lNombre').value = localStorage.getItem('autovias_nombre') || ''; } catch (e) {} }
+async function login() {
+  const nombre = document.getElementById('lNombre').value.trim(), pin = document.getElementById('lPin').value.trim();
+  if (!nombre) return toast('Poné tu nombre', 'mal');
+  if (!pin) return toast('Falta el PIN', 'mal');
+  const b = document.getElementById('bLogin'); b.disabled = true; b.textContent = 'Entrando…';
+  CRED = { pin, nombre };
+  try {
+    await api('login');
+    localStorage.setItem('autovias_cred', JSON.stringify(CRED)); localStorage.setItem('autovias_nombre', nombre);
+    document.getElementById('login').classList.remove('on'); cargar();
+  } catch (e) { CRED = null; toast(e.message, 'mal'); }
+  b.disabled = false; b.textContent = 'Entrar';
+}
+function salir() { localStorage.removeItem('autovias_cred'); CRED = null; D = null; mostrarLogin(); }
+document.getElementById('lPin').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 const fmtUSD = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-AR', {maximumFractionDigits:0});
 const fmtUSD2 = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-AR', {minimumFractionDigits:1, maximumFractionDigits:1});
 const fmtN = (v, d=1) => v == null ? '—' : Number(v).toLocaleString('es-AR', {maximumFractionDigits:d});
@@ -147,7 +197,8 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
 function toast(msg, tipo) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast on ' + (tipo||''); setTimeout(() => t.className = 'toast', 3200); }
 
 function cargar() {
-  google.script.run.withSuccessHandler(d => { D = d; render(); }).withFailureHandler(e => toast('Error al cargar: ' + e.message, 'mal')).getDatos();
+  if (!(CRED || credenciales())) return mostrarLogin();
+  api('datos').then(d => { D = d; render(); }).catch(e => toast('Error al cargar: ' + e.message, 'mal'));
 }
 
 function render() {
@@ -212,10 +263,10 @@ function render() {
   mk('chCosto', { type:'line', data:{ labels:lbl, datasets:[
     { label:'Costo/t del día', data:s.map(x=>x.costoT), borderColor:'#2A3D7C', backgroundColor:'#2A3D7C', tension:.2, pointRadius:3 },
     { label:'Promedio obra', data:s.map(x=>x.acumCostoT), borderColor:'#3f57a6', borderDash:[6,4], pointRadius:0, tension:.2 },
-    { label:'Precio pactado', data:s.map(()=>D.cfg.PRECIO_T), borderColor:'#1e8449', pointRadius:0, borderWidth:2 } ]},
+    { label:'Precio pactado', data:s.map(()=>D.cfg.PRECIO_T), borderColor:'#0f766e', pointRadius:0, borderWidth:2 } ]},
     options:{ plugins:{legend:{position:'bottom'}}, scales:{y:{title:{display:true,text:'USD/t'}}} } });
   mk('chUtil', { data:{ labels:lbl, datasets:[
-    { type:'bar', label:'Utilidad del día', data:s.map(x=>x.utilidad), backgroundColor:s.map(x=>x.utilidad>=0?'#27ae60':'#c0392b') },
+    { type:'bar', label:'Utilidad del día', data:s.map(x=>x.utilidad), backgroundColor:s.map(x=>x.utilidad>=0?'#0f766e':'#c0392b') },
     { type:'line', label:'Acumulada', data:s.map(x=>x.acumUtil), borderColor:'#2A3D7C', yAxisID:'y2', pointRadius:0, tension:.2 } ]},
     options:{ plugins:{legend:{position:'bottom'}}, scales:{ y:{title:{display:true,text:'USD/día'}}, y2:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'USD acum.'}} } } });
   mk('chT', { type:'bar', data:{ labels:lbl, datasets:[{ label:'t colocadas', data:s.map(x=>x.t), backgroundColor:'#3f57a6' }]},
@@ -257,19 +308,18 @@ function guardar() {
   if (t === '' ) return toast('Falta la cantidad de toneladas', 'mal');
   if (fecha > D.hoy) return toast('No se puede cargar una fecha futura', 'mal');
   const b = document.getElementById('bGuardar'); b.disabled = true; b.textContent = 'Guardando…';
-  google.script.run.withSuccessHandler(r => {
+  api('guardarDia', { fecha, t, viajes: document.getElementById('fV').value, obs: document.getElementById('fObs').value, jornada }).then(r => {
     b.disabled = false; b.textContent = 'Guardar día';
     toast(r.editado ? 'Día actualizado' : 'Día guardado', 'ok');
     document.getElementById('fT').value = ''; document.getElementById('fV').value = ''; document.getElementById('fObs').value = ''; setJ(1);
     cargar();
-  }).withFailureHandler(e => { b.disabled = false; b.textContent = 'Guardar día'; toast(e.message, 'mal'); })
-  .guardarDia({ fecha, t, viajes: document.getElementById('fV').value, obs: document.getElementById('fObs').value, jornada });
+  }).catch(e => { b.disabled = false; b.textContent = 'Guardar día'; toast(e.message, 'mal'); });
 }
 function guardarPuntas() {
   const fecha = document.getElementById('pFecha').value, juegos = document.getElementById('pJ').value;
   if (!fecha || !juegos) return toast('Completá fecha y cantidad', 'mal');
-  google.script.run.withSuccessHandler(() => { toast('Recambio registrado', 'ok'); document.getElementById('pObs').value = ''; cargar(); })
-    .withFailureHandler(e => toast(e.message, 'mal')).guardarPuntas({ fecha, juegos, obs: document.getElementById('pObs').value });
+  api('guardarPuntas', { fecha, juegos, obs: document.getElementById('pObs').value })
+    .then(() => { toast('Recambio registrado', 'ok'); document.getElementById('pObs').value = ''; cargar(); }).catch(e => toast(e.message, 'mal'));
 }
 function editar(fecha) {
   const x = D.serie.find(s => s.fecha === fecha); if (!x) return;
@@ -277,8 +327,10 @@ function editar(fecha) {
   document.querySelector('.tabs button[data-t=carga]').click(); window.scrollTo(0,0);
 }
 
-cargar();
-setInterval(cargar, 5*60*1000);
+// guard.js canjea el ticket de la app INGECO de forma asíncrona: le damos un momento antes de decidir si pedir PIN.
+if (window.INGECO_SESION || credenciales()) cargar(); else setTimeout(cargar, 700);
+setInterval(() => { if (D) cargar(); }, 5*60*1000);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
 </html>

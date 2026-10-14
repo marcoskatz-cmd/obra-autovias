@@ -3,7 +3,7 @@
  * INGECO S.A. — Apps Script + Sheets
  *
  * Fuente de combustible: planilla "ENTREGAS DE COMBUSTIBLE - LEANDRO CASARES"
- * Acceso: solo los mails listados en CONFIG > ACCESO
+ * Frontend: GitHub Pages (docs/) → API JSON por doPost. Acceso: PIN de CONFIG o sesión de la app INGECO.
  */
 
 // ---------- IDs ----------
@@ -13,25 +13,81 @@ const HOJA_ENTREGAS = 'ENTREGAS';
 const TABS = { CONFIG: 'CONFIG', PROD: 'PRODUCCION', PUNTAS: 'PUNTAS', EQUIPOS: 'EQUIPOS' };
 
 // ---------- Web app ----------
+// El frontend vive en GitHub Pages; este /exec solo expone la API JSON (doPost).
+const URL_APP = 'https://marcoskatz-cmd.github.io/obra-autovias/';
+const APP_INGECO_BACKEND = 'https://script.google.com/macros/s/AKfycbx9NN1FfOQjUjfymLXrMyd2QM6l96HP0lxY6RC7_xKsbDlO0PnwdHbaMtag54VYFor0/exec';
+const MODULO_INGECO = 'AUTOVIAS';
+
 function doGet() {
-  const user = Session.getActiveUser().getEmail();
-  if (!accesoPermitido_(user)) {
-    return HtmlService.createHtmlOutput(
-      '<div style="font-family:sans-serif;padding:40px;text-align:center">' +
-      '<h2>Sin acceso</h2><p>Esta herramienta es de uso restringido.<br>Cuenta: ' + (user || 'no identificada') + '</p></div>'
-    ).setTitle('Sin acceso');
-  }
-  return HtmlService.createHtmlOutputFromFile('index')
-    .setTitle('Seguimiento Autovías — INGECO')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  return HtmlService.createHtmlOutput(
+    '<meta http-equiv="refresh" content="0;url=' + URL_APP + '">' +
+    '<div style="font-family:sans-serif;padding:40px;text-align:center">Abriendo la app… <a href="' + URL_APP + '">' + URL_APP + '</a></div>'
+  ).setTitle('Seguimiento Autovías — INGECO');
 }
 
-function accesoPermitido_(email) {
-  if (!email) return false;
+// Body (text/plain para evitar preflight): { accion, pin | sesion, nombre, payload }
+function doPost(e) {
+  let body;
+  try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
+  catch (err) { return json_({ ok: false, error: 'Cuerpo inválido' }); }
+  try {
+    const user = autorizar_(body);
+    const p = body.payload || {};
+    let data;
+    switch (body.accion) {
+      case 'login': data = { ok: true }; break;
+      case 'datos': data = getDatos(user); break;
+      case 'guardarDia': data = guardarDia(p, user); break;
+      case 'guardarPuntas': data = guardarPuntas(p, user); break;
+      case 'borrarDia': data = borrarDia(p.fecha, user); break;
+      default: throw new Error('Acción desconocida: ' + body.accion);
+    }
+    return json_({ ok: true, data, usuario: user });
+  } catch (err) {
+    return json_({ ok: false, error: err.message || String(err) });
+  }
+}
+
+function json_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// Devuelve el nombre de quien opera. Entra con sesión de la app INGECO (sin PIN) o con el PIN de CONFIG.
+function autorizar_(body) {
+  const nombre = String(body.nombre || '').trim().slice(0, 60);
+  if (body.sesion && sesionIngecoOk_(body.sesion)) return nombre || 'App INGECO';
   const cfg = leerConfig_();
-  const lista = (cfg.ACCESO || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  return lista.includes(email.toLowerCase());
+  const pin = String(cfg.PIN === undefined || cfg.PIN === '' ? '1234' : cfg.PIN).trim();
+  if (String(body.pin || '').trim() !== pin) throw new Error('PIN incorrecto');
+  if (!nombre) throw new Error('Falta el nombre');
+  return nombre;
+}
+
+// Sesión de módulo emitida por app-ingeco al canjear el ticket (guard.js). Se cachea 10 min.
+function sesionIngecoOk_(sesion) {
+  if (!sesion || String(sesion).length < 20) return false;
+  const cache = CacheService.getScriptCache();
+  const k = 'ingeco_ses_' + String(sesion).slice(0, 40);
+  const c = cache.get(k);
+  if (c === '1') return true;
+  if (c === '0') return false;
+  let ok = false;
+  try {
+    const r = UrlFetchApp.fetch(APP_INGECO_BACKEND, {
+      method: 'post', contentType: 'text/plain;charset=utf-8', muteHttpExceptions: true,
+      payload: JSON.stringify({ accion: 'validar_sesion_modulo', payload: { sesion: String(sesion), modulo: MODULO_INGECO } })
+    });
+    const j = JSON.parse(r.getContentText());
+    ok = !!(j && j.ok);
+  } catch (err) { ok = false; }
+  cache.put(k, ok ? '1' : '0', ok ? 600 : 60);
+  return ok;
+}
+
+// Correr UNA vez desde el editor para autorizar UrlFetchApp (acceso desde la app INGECO).
+function autorizarAppIngeco() {
+  const r = UrlFetchApp.fetch(APP_INGECO_BACKEND + '?accion=ping', { muteHttpExceptions: true });
+  Logger.log('App INGECO respondió: ' + r.getContentText().slice(0, 120));
 }
 
 // ---------- Setup inicial (correr una vez desde el editor) ----------
@@ -42,7 +98,8 @@ function setup() {
   cfg.clear();
   cfg.getRange(1, 1, 1, 3).setValues([['CLAVE', 'VALOR', 'DESCRIPCIÓN']]).setFontWeight('bold');
   const rows = [
-    ['ACCESO', 'marcoskatz@grupoingeco.com.ar, agustin@grupoingeco.com.ar', 'Mails con acceso, separados por coma'],
+    ['PIN', '1234', 'PIN de acceso a la app (desde la app INGECO no hace falta)'],
+    ['ACCESO', 'marcoskatz@grupoingeco.com.ar, agustin@grupoingeco.com.ar', 'Referencia: quiénes usan la app'],
     ['OBRA_COMBUSTIBLE', 'autovia del noa', 'Texto con que Leandro identifica esta obra en la columna OBRA GENERAL (o LUGAR ENTREGA)'],
     ['TC', 1540, 'Tipo de cambio $/USD'],
     ['IVA', 0.21, 'IVA para netear'],
@@ -165,7 +222,7 @@ function aNumero_(v) {
 }
 
 // ---------- Datos para la app ----------
-function getDatos() {
+function getDatos(user) {
   const cfg = leerConfig_();
   const TC = Number(cfg.TC), IVA = Number(cfg.IVA);
   const eq = costoEquiposDia_(cfg);
@@ -230,15 +287,14 @@ function getDatos() {
     base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_USD), senalDia: Number(cfg.SENAL_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
     serie, acum, recambios,
     combustible: comb.diag,
-    user: Session.getActiveUser().getEmail(),
+    user: user || '',
     hoy: Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'),
   };
 }
 
 // ---------- Carga ----------
-function guardarDia(p) {
-  const user = Session.getActiveUser().getEmail();
-  if (!accesoPermitido_(user)) throw new Error('Sin permiso');
+function guardarDia(p, user) {
+  if (!user) throw new Error('Sin permiso');
   const fecha = String(p.fecha || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error('Fecha inválida');
   const t = Number(p.t);
@@ -262,9 +318,8 @@ function guardarDia(p) {
   return { ok: true, editado: fila > 0 };
 }
 
-function guardarPuntas(p) {
-  const user = Session.getActiveUser().getEmail();
-  if (!accesoPermitido_(user)) throw new Error('Sin permiso');
+function guardarPuntas(p, user) {
+  if (!user) throw new Error('Sin permiso');
   const fecha = String(p.fecha || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error('Fecha inválida');
   const juegos = Number(p.juegos);
@@ -274,9 +329,8 @@ function guardarPuntas(p) {
   return { ok: true };
 }
 
-function borrarDia(fecha) {
-  const user = Session.getActiveUser().getEmail();
-  if (!accesoPermitido_(user)) throw new Error('Sin permiso');
+function borrarDia(fecha, user) {
+  if (!user) throw new Error('Sin permiso');
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.PROD);
   const n = sh.getLastRow(); if (n < 2) return { ok: false };
   const fechas = sh.getRange(2, 1, n - 1, 1).getValues();
