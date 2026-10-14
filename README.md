@@ -57,3 +57,19 @@ utilidad   = t × PRECIO_T − costo          (sin gastos generales, sin IVA)
 - `Codigo.gs` — backend: lectura de config, combustible, cálculo, guardado.
 - `index.html` — frontend mobile-first (Chart.js desde cdnjs).
 - `appsscript.json` — manifiesto (zona horaria, web app).
+
+## Deploy
+
+- **scriptId**: `1TJmbbw5nDvbi57LmSYyKfeOzV5HNT62OaotdAYdnGv_YsJzfctO1_CTJ`
+- **Planilla**: https://docs.google.com/spreadsheets/d/1oXBh5DDSIeCPsNxv9agst84b5KSOTdTpb3vNDIxKOl4/edit
+- **Editor**: https://script.google.com/d/1TJmbbw5nDvbi57LmSYyKfeOzV5HNT62OaotdAYdnGv_YsJzfctO1_CTJ/edit
+- **deploymentId**: `AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg`
+- **URL de la app**: https://script.google.com/macros/s/AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg/exec
+
+Actualizar (desde esta carpeta, con `.clasp.json` presente):
+
+```bash
+clasp push -f && clasp deploy -i AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg -d "cambio"
+```
+
+Nota: `clasp run` no funciona hasta asociar un proyecto GCP estándar al script; `setup` se ejecutó desde el editor.
