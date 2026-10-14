@@ -40,6 +40,7 @@ function doPost(e) {
       case 'guardarDia': data = guardarDia(p, user); break;
       case 'guardarPuntas': data = guardarPuntas(p, user); break;
       case 'borrarDia': data = borrarDia(p.fecha, user); break;
+      case 'obras': data = obrasCombustible_(); break;
       default: throw new Error('Acción desconocida: ' + body.accion);
     }
     return json_({ ok: true, data, usuario: user });
@@ -100,7 +101,7 @@ function setup() {
   const rows = [
     ['PIN', '1234', 'PIN de acceso a la app (desde la app INGECO no hace falta)'],
     ['ACCESO', 'marcoskatz@grupoingeco.com.ar, agustin@grupoingeco.com.ar', 'Referencia: quiénes usan la app'],
-    ['OBRA_COMBUSTIBLE', 'autovia del noa', 'Texto con que Leandro identifica esta obra en la columna OBRA GENERAL (o LUGAR ENTREGA)'],
+    ['OBRA_COMBUSTIBLE', 'autovia', 'Texto con que Leandro identifica esta obra (OBRA GENERAL o LUGAR ENTREGA). Contiene, sin mayúsculas ni tildes. Él carga "Autovía" / "Autovía del NOA"'],
     ['TC', 1540, 'Tipo de cambio $/USD'],
     ['IVA', 0.21, 'IVA para netear'],
     ['COMB_CON_IVA', 1, '1 si el precio de la planilla de combustible incluye IVA'],
@@ -189,10 +190,10 @@ function combustiblePorDia_(cfg) {
           iO = head.indexOf('OBRA GENERAL'), iLug = head.findIndex(h => h.startsWith('LUGAR ENTREGA')), iEq = head.findIndex(h => h.startsWith('EQUIPO'));
     const faltan = [['FECHA', iF], ['CANTIDAD (L)', iL], ['PRECIO TOTAL', iT], ['OBRA GENERAL', iO]].filter(x => x[1] < 0).map(x => x[0]);
     if (faltan.length) throw new Error('Faltan columnas en la planilla de combustible: ' + faltan.join(', '));
-    const clave = String(cfg.OBRA_COMBUSTIBLE || '').toLowerCase().trim();
+    const clave = sinTildes_(cfg.OBRA_COMBUSTIBLE);
     for (let i = 1; i < data.length; i++) {
       const r = data[i];
-      const obra = String(r[iO] || '').toLowerCase(), lugar = String(iLug >= 0 ? r[iLug] : '').toLowerCase();
+      const obra = sinTildes_(r[iO]), lugar = sinTildes_(iLug >= 0 ? r[iLug] : '');
       if (!clave || (!obra.includes(clave) && !lugar.includes(clave))) continue;
       const d = aFecha_(r[iF]); if (!d) continue;
       const k = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
@@ -207,6 +208,25 @@ function combustiblePorDia_(cfg) {
     if (!total) diag.ok = false;
   } catch (e) { diag = { ok: false, msg: 'No se pudo leer combustible: ' + e.message }; }
   return { porDia: out, diag };
+}
+
+function sinTildes_(v) { return String(v || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+
+// Diagnóstico: valores distintos de OBRA GENERAL / LUGAR ENTREGA en la planilla de Leandro (últimas filas)
+function obrasCombustible_() {
+  const sh = SpreadsheetApp.openById(ID_COMBUSTIBLE).getSheetByName(HOJA_ENTREGAS);
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(h => String(h).trim().toUpperCase());
+  const iO = head.indexOf('OBRA GENERAL'), iLug = head.findIndex(h => h.startsWith('LUGAR ENTREGA')), iF = head.indexOf('FECHA');
+  const cnt = {};
+  for (let i = Math.max(1, data.length - 400); i < data.length; i++) {
+    const r = data[i];
+    const k = String(r[iO] || '').trim() + ' | ' + String(iLug >= 0 ? r[iLug] : '').trim();
+    const d = aFecha_(r[iF]);
+    if (!cnt[k]) cnt[k] = { n: 0, ultima: '' };
+    cnt[k].n++; if (d) { const f = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'); if (f > cnt[k].ultima) cnt[k].ultima = f; }
+  }
+  return { columnas: head, obras: Object.keys(cnt).map(k => ({ obra_lugar: k, n: cnt[k].n, ultima: cnt[k].ultima })).sort((a, b) => a.ultima < b.ultima ? 1 : -1) };
 }
 
 function aFecha_(v) {

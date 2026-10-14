@@ -1,6 +1,6 @@
 # Seguimiento Obra Autovías — Bacheo con fresado
 
-Panel de costo y utilidad diaria. Apps Script + Google Sheets. Acceso restringido por mail.
+Panel de costo y utilidad diaria. Frontend en GitHub Pages + backend Apps Script/Google Sheets. Acceso por PIN o desde la app INGECO.
 
 ## Qué hace
 
@@ -10,29 +10,26 @@ Panel de costo y utilidad diaria. Apps Script + Google Sheets. Acceso restringid
 - **Panel**: costo/t del día y promedio de obra, utilidad del día / promedio / acumulada, punto de equilibrio, gráficos de evolución, estructura del costo.
 - Parámetros (TC, alquileres, precio pactado, flete) viven en la planilla: pestañas `CONFIG` y `EQUIPOS`.
 
+## Arquitectura
+
+- **Frontend**: `docs/` servido por GitHub Pages → https://marcoskatz-cmd.github.io/obra-autovias/ (PWA instalable, logo INGECO).
+- **Backend**: Apps Script vinculado a la planilla, expuesto como API JSON por `doPost` (body `text/plain` `{ accion, pin | sesion, nombre, payload }`). Acciones: `login`, `datos`, `guardarDia`, `guardarPuntas`, `borrarDia`, `obras` (diagnóstico de nombres de obra en la planilla de Leandro).
+- **Acceso**: PIN de obra (fila `PIN` de CONFIG, hoy 1234) + nombre de quien carga, guardado en el celular. Desde la app INGECO entra sin PIN (guard.js, módulo `AUTOVIAS`, validado contra app-ingeco). El `/exec` del script solo redirige a Pages.
+
 ## Instalación (una sola vez)
 
-1. Crear una Google Sheet nueva en el Shared Drive de INGECO: **"SEGUIMIENTO OBRA AUTOVIAS"**. Compartirla solo con Marcos y Agustín.
-2. Extensiones → Apps Script. Copiar el `scriptId` (Configuración del proyecto).
-3. En esta carpeta:
-   ```bash
-   npm i -g @google/clasp
-   clasp login
-   cp .clasp.json.example .clasp.json   # pegar el scriptId
-   clasp push
-   ```
-4. En el editor de Apps Script ejecutar **`setup`** una vez (crea CONFIG, EQUIPOS, PRODUCCION, PUNTAS). Aceptar permisos: lee Sheets (la planilla de Leandro) y usa Session.
-5. Editar `CONFIG`:
-   - `ACCESO`: mails con permiso, separados por coma. Verificar el mail exacto de Agustín.
-   - `OBRA_COMBUSTIBLE`: el texto con que Leandro va a identificar esta obra en la columna **OBRA GENERAL** (o en LUGAR ENTREGA). **Esto hay que acordarlo con Leandro antes de que empiece a cargar** — si él escribe "Autovias" sin tilde y acá dice "Autovías", no matchea. El filtro es *contiene*, sin distinguir mayúsculas, pero sí tildes.
-6. Implementar → Nueva implementación → Aplicación web:
-   - Ejecutar como: **Yo** (Marcos). La app lee la planilla de Leandro con tu permiso; Agustín no necesita acceso a esa planilla.
-   - Acceso: **Cualquier usuario de grupoingeco.com.ar**. El filtro real es la lista `ACCESO`: cualquier otra cuenta del dominio ve "Sin acceso".
-7. Pasarle la URL a Agustín. En el celular: abrir en Chrome → menú → "Agregar a pantalla de inicio".
+1. `clasp login` con la cuenta de INGECO. `clasp create --type sheets --title "SEGUIMIENTO OBRA AUTOVIAS" --rootDir .` crea planilla + script (ojo: pisa `appsscript.json`, restaurarlo con git). `clasp push -f`.
+2. Ejecutar **`setup`** una vez desde el editor (crea CONFIG, EQUIPOS, PRODUCCION, PUNTAS). `clasp run` no funciona sin proyecto GCP estándar.
+3. Editar `CONFIG`: `PIN`, `OBRA_COMBUSTIBLE` (texto que usa Leandro en OBRA GENERAL o LUGAR ENTREGA; el filtro es *contiene*, sin distinguir mayúsculas ni tildes), precios.
+4. `clasp deploy` como aplicación web: ejecutar como **Yo**, acceso **Cualquier usuario (anónimo)** — el control real es el PIN. Pegar la URL `/exec` en `API` dentro de `docs/index.html`.
+5. GitHub Pages: Settings → Pages → rama `master`, carpeta `/docs`.
+6. En el celular: abrir la URL de Pages en Chrome → menú ⋮ → "Instalar app" (iPhone: Safari → Compartir → "Agregar a inicio").
 
 ## Actualizar
 
-`clasp push` y luego Implementar → Administrar implementaciones → editar → Nueva versión. Nunca pegar código en el editor online.
+- Backend: `clasp push -f && clasp deploy -i <deploymentId> -d "cambio"` (ver sección Deploy).
+- Frontend: commit en `master` y `git push`; Pages publica solo en ~1 min (caché HTTP de 10 min).
+- Nunca pegar código en el editor online.
 
 ## Modelo de costo (por día cargado)
 
@@ -55,7 +52,7 @@ utilidad   = t × PRECIO_T − costo          (sin gastos generales, sin IVA)
 ## Archivos
 
 - `Codigo.gs` — backend: lectura de config, combustible, cálculo, guardado.
-- `index.html` — frontend mobile-first (Chart.js desde cdnjs).
+- `docs/` — frontend mobile-first (index.html con Chart.js desde cdnjs, manifest.json, sw.js, logo e íconos) publicado en GitHub Pages.
 - `appsscript.json` — manifiesto (zona horaria, web app).
 
 ## Deploy
@@ -64,7 +61,9 @@ utilidad   = t × PRECIO_T − costo          (sin gastos generales, sin IVA)
 - **Planilla**: https://docs.google.com/spreadsheets/d/1oXBh5DDSIeCPsNxv9agst84b5KSOTdTpb3vNDIxKOl4/edit
 - **Editor**: https://script.google.com/d/1TJmbbw5nDvbi57LmSYyKfeOzV5HNT62OaotdAYdnGv_YsJzfctO1_CTJ/edit
 - **deploymentId**: `AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg`
-- **URL de la app**: https://script.google.com/macros/s/AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg/exec
+- **URL de la app (Pages)**: https://marcoskatz-cmd.github.io/obra-autovias/
+- **URL de la API (/exec)**: https://script.google.com/macros/s/AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg/exec
+- **Repo**: https://github.com/marcoskatz-cmd/obra-autovias (público: GitHub Pages lo requiere en cuenta Free; no contiene secretos)
 
 Actualizar (desde esta carpeta, con `.clasp.json` presente):
 
@@ -72,4 +71,4 @@ Actualizar (desde esta carpeta, con `.clasp.json` presente):
 clasp push -f && clasp deploy -i AKfycbwWwSGkx8kvPjYXGQvMTAc_7jYKqcOV47mDeWXOHm_FHOZcZ9v0RIXr1TYEo4JEPOqywg -d "cambio"
 ```
 
-Nota: `clasp run` no funciona hasta asociar un proyecto GCP estándar al script; `setup` se ejecutó desde el editor.
+
