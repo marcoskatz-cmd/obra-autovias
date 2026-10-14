@@ -8,12 +8,13 @@ Panel de costo y utilidad diaria. Frontend en GitHub Pages + backend Apps Script
 - **Combustible real** leído de `ENTREGAS DE COMBUSTIBLE - LEANDRO CASARES`, filtrando por la obra. Días sin carga usan el estimado y quedan marcados.
 - **Recambios de puntas** para calibrar la vida útil real.
 - **Panel**: costo/t del día y promedio de obra, utilidad del día / promedio / acumulada, punto de equilibrio, gráficos de evolución, estructura del costo.
-- Parámetros (TC, alquileres, precio pactado, flete) viven en la planilla: pestañas `CONFIG` y `EQUIPOS`.
+- **Costos editables desde la app** (pestaña Costos): parámetros de CONFIG y lista de EQUIPOS. La planilla es solo almacenamiento; nadie necesita abrirla.
+- **Combustible por día con prioridad**: monto manual cargado en el día → planilla de Leandro → estimado.
 
 ## Arquitectura
 
 - **Frontend**: `docs/` servido por GitHub Pages → https://marcoskatz-cmd.github.io/obra-autovias/ (PWA instalable, logo INGECO).
-- **Backend**: Apps Script vinculado a la planilla, expuesto como API JSON por `doPost` (body `text/plain` `{ accion, pin | sesion, nombre, payload }`). Acciones: `login`, `datos`, `guardarDia`, `guardarPuntas`, `borrarDia`, `obras` (diagnóstico de nombres de obra en la planilla de Leandro).
+- **Backend**: Apps Script vinculado a la planilla, expuesto como API JSON por `doPost` (body `text/plain` `{ accion, pin | sesion, nombre, payload }`). Acciones: `login`, `datos`, `guardarDia` (acepta `comb` en $ para el día), `guardarPuntas`, `borrarDia`, `config`, `guardarConfig`, `obras` (diagnóstico de nombres de obra en la planilla de Leandro).
 - **Acceso**: PIN de obra (fila `PIN` de CONFIG, hoy 1234) + nombre de quien carga, guardado en el celular. Desde la app INGECO entra sin PIN (guard.js, módulo `AUTOVIAS`, validado contra app-ingeco). El `/exec` del script solo redirige a Pages.
 
 ## Instalación (una sola vez)
@@ -35,7 +36,7 @@ Panel de costo y utilidad diaria. Frontend en GitHub Pages + backend Apps Script
 
 ```
 fijos      = (Σ alquileres USD/mes ÷ DIAS_MES) + MO_USD + SENAL_USD      [× 0 si jornada = parada]
-combustible= real de Leandro ÷ (1+IVA si COMB_CON_IVA) ÷ TC   |   COMB_ESTIMADO_ARS ÷ TC si no hay carga
+combustible= manual del día | real de Leandro | COMB_ESTIMADO_ARS   (÷ (1+IVA si COMB_CON_IVA) ÷ TC)
 flete      = viajes × FLETE_ARS ÷ TC        viajes = ceil(t ÷ CAP_CAMION) salvo carga manual
 puntas     = t × (PUNTAS_JUEGO_ARS ÷ 1,21 ÷ TC ÷ vida) × SOBREFRESADO
              vida = PUNTAS_VIDA_T hasta tener ≥2 recambios; después t fresadas reales entre recambios
