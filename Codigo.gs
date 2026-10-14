@@ -41,6 +41,8 @@ function doPost(e) {
       case 'guardarPuntas': data = guardarPuntas(p, user); break;
       case 'borrarDia': data = borrarDia(p.fecha, user); break;
       case 'obras': data = obrasCombustible_(); break;
+      case 'config': data = leerConfigCompleta_(); break;
+      case 'guardarConfig': data = guardarConfig(p, user); break;
       default: throw new Error('Acción desconocida: ' + body.accion);
     }
     return json_({ ok: true, data, usuario: user });
@@ -138,7 +140,7 @@ function setup() {
 
   let prod = ss.getSheetByName(TABS.PROD) || ss.insertSheet(TABS.PROD);
   if (prod.getLastRow() === 0) {
-    prod.getRange(1, 1, 1, 7).setValues([['FECHA', 'TONELADAS', 'VIAJES', 'OBSERVACIONES', 'CARGADO POR', 'TIMESTAMP', 'JORNADA']]).setFontWeight('bold');
+    prod.getRange(1, 1, 1, 8).setValues([['FECHA', 'TONELADAS', 'VIAJES', 'OBSERVACIONES', 'CARGADO POR', 'TIMESTAMP', 'JORNADA', 'COMBUSTIBLE_ARS']]).setFontWeight('bold');
     prod.setFrozenRows(1);
   }
 
@@ -160,6 +162,48 @@ function leerConfig_() {
   const o = {};
   v.forEach(r => { if (r[0]) o[r[0]] = r[1]; });
   return o;
+}
+
+// Config completa para editar desde la app
+function leerConfigCompleta_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sc = ss.getSheetByName(TABS.CONFIG);
+  const config = sc.getLastRow() > 1 ? sc.getRange(2, 1, sc.getLastRow() - 1, 3).getValues().filter(r => r[0]).map(r => ({ clave: String(r[0]), valor: r[1], desc: String(r[2] || '') })) : [];
+  const se = ss.getSheetByName(TABS.EQUIPOS);
+  const equipos = se.getLastRow() > 1 ? se.getRange(2, 1, se.getLastRow() - 1, 5).getValues().filter(r => r[0]).map(r => ({ equipo: String(r[0]), precio: Number(r[1]) || 0, moneda: r[2] === 'USD' ? 'USD' : 'ARS', conIva: Number(r[3]) === 1 ? 1 : 0, obs: String(r[4] || '') })) : [];
+  return { config, equipos };
+}
+
+const CLAVES_NUM = ['TC', 'IVA', 'COMB_CON_IVA', 'DIAS_MES', 'PRECIO_T', 'SOBREFRESADO', 'CAP_CAMION', 'FLETE_ARS', 'COMB_ESTIMADO_ARS', 'MO_USD', 'SENAL_USD', 'PUNTAS_JUEGO_ARS', 'PUNTAS_VIDA_T'];
+
+function guardarConfig(p, user) {
+  if (!user) throw new Error('Sin permiso');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sc = ss.getSheetByName(TABS.CONFIG);
+  const n = Math.max(sc.getLastRow() - 1, 0);
+  const rows = n ? sc.getRange(2, 1, n, 2).getValues() : [];
+  const cambios = p.config || {};
+  Object.keys(cambios).forEach(k => {
+    let v = cambios[k];
+    if (CLAVES_NUM.includes(k)) { v = Number(String(v).replace(',', '.')); if (isNaN(v) || v < 0) throw new Error('Valor inválido en ' + k); }
+    else v = String(v).trim().slice(0, 200);
+    if (k === 'PIN' && String(v).length < 4) throw new Error('El PIN debe tener al menos 4 caracteres');
+    if ((k === 'TC' || k === 'PRECIO_T' || k === 'DIAS_MES' || k === 'CAP_CAMION' || k === 'PUNTAS_VIDA_T') && !(v > 0)) throw new Error(k + ' debe ser mayor a 0');
+    const i = rows.findIndex(r => String(r[0]) === k);
+    if (i >= 0) sc.getRange(i + 2, 2).setValue(v);
+    else sc.appendRow([k, v, '']);
+  });
+  if (Array.isArray(p.equipos)) {
+    const se = ss.getSheetByName(TABS.EQUIPOS);
+    const lista = p.equipos.filter(e => e && String(e.equipo || '').trim()).map(e => {
+      const precio = Number(String(e.precio).replace(',', '.')) || 0;
+      if (precio < 0) throw new Error('Precio inválido en ' + e.equipo);
+      return [String(e.equipo).trim().slice(0, 80), precio, e.moneda === 'USD' ? 'USD' : 'ARS', Number(e.conIva) === 1 ? 1 : 0, String(e.obs || '').slice(0, 120)];
+    });
+    if (se.getLastRow() > 1) se.getRange(2, 1, se.getLastRow() - 1, 5).clearContent();
+    if (lista.length) se.getRange(2, 1, lista.length, 5).setValues(lista);
+  }
+  return { ok: true };
 }
 
 function costoEquiposDia_(cfg) {
@@ -265,8 +309,8 @@ function getDatos(user) {
   const shD = ss.getSheetByName(TABS.PROD);
   let dias = [];
   if (shD && shD.getLastRow() > 1) {
-    dias = shD.getRange(2, 1, shD.getLastRow() - 1, 7).getValues().filter(r => r[0])
-      .map(r => ({ fecha: Utilities.formatDate(new Date(r[0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'), t: Number(r[1]) || 0, viajes: r[2] === '' ? null : Number(r[2]), obs: r[3], por: r[4], jornada: r[6] === '' ? 1 : Number(r[6]) }))
+    dias = shD.getRange(2, 1, shD.getLastRow() - 1, 8).getValues().filter(r => r[0])
+      .map(r => ({ fecha: Utilities.formatDate(new Date(r[0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'), t: Number(r[1]) || 0, viajes: r[2] === '' ? null : Number(r[2]), obs: r[3], por: r[4], jornada: r[6] === '' ? 1 : Number(r[6]), combArs: r[7] === '' || r[7] === null || r[7] === undefined ? null : Number(r[7]) }))
       .sort((a, b) => a.fecha < b.fecha ? -1 : 1);
   }
 
@@ -286,7 +330,9 @@ function getDatos(user) {
     const jornada = d.jornada;
     const fijos = fijoDia * jornada;
     const c = comb.porDia[d.fecha];
-    const combUSD = c ? c.ars / combDiv / TC : combEstUSD * jornada;
+    const manual = d.combArs !== null && !isNaN(d.combArs);
+    const combUSD = manual ? d.combArs / combDiv / TC : (c ? c.ars / combDiv / TC : combEstUSD * jornada);
+    const combFuente = manual ? 'manual' : (c ? 'real' : 'estimado');
     const viajes = d.viajes !== null ? d.viajes : Math.ceil(d.t / Number(cfg.CAP_CAMION));
     const flete = viajes * fleteUSD;
     const puntas = d.t * puntasPorT;
@@ -296,14 +342,14 @@ function getDatos(user) {
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
       fecha: d.fecha, t: d.t, viajes, jornada, obs: d.obs, por: d.por,
-      fijos, comb: combUSD, combReal: !!c, litros: c ? c.litros : null, flete, puntas,
+      fijos, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,
     };
   });
 
   return {
-    cfg: { TC, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE },
+    cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE },
     base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_USD), senalDia: Number(cfg.SENAL_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
     serie, acum, recambios,
     combustible: comb.diag,
@@ -332,8 +378,11 @@ function guardarDia(p, user) {
       if (fechas[i][0] && Utilities.formatDate(new Date(fechas[i][0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') === fecha) { fila = i + 2; break; }
     }
   }
-  const row = [d, t, viajes, String(p.obs || '').slice(0, 300), user, new Date(), jornada];
-  if (fila > 0) sh.getRange(fila, 1, 1, 7).setValues([row]);
+  const combArs = p.comb === '' || p.comb === null || p.comb === undefined ? '' : Number(p.comb);
+  if (combArs !== '' && (isNaN(combArs) || combArs < 0 || combArs > 50000000)) throw new Error('Combustible fuera de rango');
+  const row = [d, t, viajes, String(p.obs || '').slice(0, 300), user, new Date(), jornada, combArs];
+  if (sh.getLastColumn() < 8) sh.getRange(1, 8).setValue('COMBUSTIBLE_ARS').setFontWeight('bold');
+  if (fila > 0) sh.getRange(fila, 1, 1, 8).setValues([row]);
   else sh.appendRow(row);
   return { ok: true, editado: fila > 0 };
 }
