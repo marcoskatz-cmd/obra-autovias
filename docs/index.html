@@ -51,7 +51,7 @@ main{padding:14px;max-width:960px;margin:0 auto}
 .kpi.ok .v{color:var(--ok)}.kpi.mal .v{color:var(--mal)}
 .card{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
 .card h3{margin:0 0 10px;font-size:14px;color:var(--azul)}
-canvas{width:100%!important;max-height:260px}
+canvas{width:100%!important;max-height:280px}
 .aviso{border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .aviso.warn{background:#fff6e5;border:1px solid #f0c36d;color:#7a4e00}
 .aviso.mal{background:#fdecea;border:1px solid #f1a6a0;color:#7b1d14}
@@ -106,6 +106,8 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
   <div class="card"><h3>Costo por tonelada — diario vs. promedio de obra</h3><canvas id="chCosto"></canvas></div>
   <div class="card"><h3>Utilidad diaria y acumulada (USD)</h3><canvas id="chUtil"></canvas></div>
   <div class="card"><h3>Toneladas por día</h3><canvas id="chT"></canvas></div>
+  <div class="card"><h3>Costo real vs. precio pactado según producción diaria</h3><div class="small" id="simTxt" style="margin-bottom:8px"></div><canvas id="chSimC"></canvas></div>
+  <div class="card"><h3>Utilidad bruta diaria según producción</h3><canvas id="chSimU"></canvas></div>
   <div class="card"><h3>Estructura del costo acumulado</h3><div id="estructura" class="small"></div></div>
 </section>
 
@@ -303,12 +305,13 @@ function render() {
     { label:'Promedio obra', data:s.map(x=>x.acumCostoT), borderColor:'#3f57a6', borderDash:[6,4], pointRadius:0, tension:.2 },
     { label:'Precio pactado', data:s.map(()=>D.cfg.PRECIO_T), borderColor:'#0f766e', pointRadius:0, borderWidth:2 } ]},
     options:{ plugins:{legend:{position:'bottom'}}, scales:{y:{title:{display:true,text:'USD/t'}}} } });
-  mk('chUtil', { data:{ labels:lbl, datasets:[
-    { type:'bar', label:'Utilidad del día', data:s.map(x=>x.utilidad), backgroundColor:s.map(x=>x.utilidad>=0?'#0f766e':'#c0392b') },
-    { type:'line', label:'Acumulada', data:s.map(x=>x.acumUtil), borderColor:'#2A3D7C', yAxisID:'y2', pointRadius:0, tension:.2 } ]},
+  mk('chUtil', { type:'line', data:{ labels:lbl, datasets:[
+    { label:'Utilidad del día', data:s.map(x=>x.utilidad), borderColor:'#0f766e', backgroundColor:'#0f766e', tension:.2, pointRadius:3 },
+    { label:'Acumulada', data:s.map(x=>x.acumUtil), borderColor:'#2A3D7C', borderDash:[6,4], yAxisID:'y2', pointRadius:0, tension:.2 } ]},
     options:{ plugins:{legend:{position:'bottom'}}, scales:{ y:{title:{display:true,text:'USD/día'}}, y2:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'USD acum.'}} } } });
-  mk('chT', { type:'bar', data:{ labels:lbl, datasets:[{ label:'t colocadas', data:s.map(x=>x.t), backgroundColor:'#3f57a6' }]},
-    options:{ plugins:{legend:{display:false}} } });
+  mk('chT', { type:'line', data:{ labels:lbl, datasets:[{ label:'t colocadas', data:s.map(x=>x.t), borderColor:'#3f57a6', backgroundColor:'rgba(63,87,166,.15)', fill:true, tension:.2, pointRadius:3 }]},
+    options:{ plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,title:{display:true,text:'t'}}} } });
+  simular(tProm);
   preview();
 }
 // ---------- costos ----------
@@ -381,6 +384,28 @@ function guardarConfig() {
     if (config.PIN !== undefined && CRED && CRED.pin) { CRED.pin = String(config.PIN).trim(); localStorage.setItem('autovias_cred', JSON.stringify(CRED)); }
     cargarCostos(); cargar();
   }).catch(e => toast(e.message, 'mal')).finally(() => { b.disabled = false; b.textContent = 'Guardar'; });
+}
+
+// ---------- simulación: costo/t y utilidad según producción diaria (como el gráfico de Marcos) ----------
+function simular(tActual) {
+  const b = D.base, P = D.cfg.PRECIO_T, CAP = D.cfg.CAP;
+  const costoDe = t => b.fijoDia + b.combEstUSD + Math.ceil(t / CAP) * b.fleteUSD + t * b.puntasPorT;
+  const ts = []; for (let t = 10; t <= 100; t++) ts.push(t);
+  const cT = ts.map(t => costoDe(t) / t), u = ts.map(t => t * P - costoDe(t));
+  let eq = ts.find(t => t * P - costoDe(t) >= 0);
+  const act = tActual > 0 ? Math.round(tActual) : null;
+  document.getElementById('simTxt').innerHTML = 'Con los costos vigentes (fijos ' + fmtUSD(b.fijoDia + b.combEstUSD) + '/día, flete ' + fmtUSD(b.fleteUSD) + ' cada ' + CAP + ' t). Los escalones son los viajes de mezcla. ' +
+    (eq ? 'Se empieza a ganar desde <b>' + eq + ' t/día</b>.' : 'No se alcanza el equilibrio ni a 100 t/día.') + (act ? ' Promedio actual: <b>' + fmtN(tActual,1) + ' t/día</b>.' : '');
+  const punto = (arr) => ts.map((t, i) => t === act ? arr[i] : null);
+  mk('chSimC', { type:'line', data:{ labels:ts, datasets:[
+    { label:'Costo directo real (USD/t)', data:cT, borderColor:'#2A3D7C', stepped:true, pointRadius:0, borderWidth:2.5 },
+    { label:'Precio pactado ' + fmtUSD2(P) + '/t', data:ts.map(()=>P), borderColor:'#0f766e', pointRadius:0, borderWidth:2.5 },
+    { label:'Hoy (promedio)', data:punto(cT), borderColor:'#c0392b', backgroundColor:'#c0392b', pointRadius:6, pointHoverRadius:7, showLine:false } ]},
+    options:{ plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{title:i=>i[0].label + ' t/día'}}}, scales:{ x:{title:{display:true,text:'t de mezcla colocadas por día'}, ticks:{maxTicksLimit:10}}, y:{title:{display:true,text:'USD/t'}} } } });
+  mk('chSimU', { type:'line', data:{ labels:ts, datasets:[
+    { label:'Utilidad bruta (USD/día)', data:u, borderColor:'#0f766e', backgroundColor:'rgba(15,118,110,.15)', fill:{target:{value:0}, above:'rgba(15,118,110,.15)', below:'rgba(192,57,43,.12)'}, stepped:true, pointRadius:0, borderWidth:2.5 },
+    { label:'Hoy (promedio)', data:punto(u), borderColor:'#c0392b', backgroundColor:'#c0392b', pointRadius:6, pointHoverRadius:7, showLine:false } ]},
+    options:{ plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{title:i=>i[0].label + ' t/día'}}}, scales:{ x:{title:{display:true,text:'t de mezcla colocadas por día'}, ticks:{maxTicksLimit:10}}, y:{title:{display:true,text:'USD/día'}} } } });
 }
 
 function mk(id, cfg) { if (charts[id]) charts[id].destroy(); cfg.options = Object.assign({responsive:true, maintainAspectRatio:false, animation:false}, cfg.options||{}); charts[id] = new Chart(document.getElementById(id), cfg); }
