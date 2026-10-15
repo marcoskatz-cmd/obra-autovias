@@ -51,7 +51,7 @@ main{padding:14px;max-width:960px;margin:0 auto}
 .kpi.ok .v{color:var(--ok)}.kpi.mal .v{color:var(--mal)}
 .card{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
 .card h3{margin:0 0 10px;font-size:14px;color:var(--azul)}
-canvas{width:100%!important;max-height:280px}
+canvas{width:100%!important;max-height:280px;touch-action:pan-y}
 .aviso{border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .aviso.warn{background:#fff6e5;border:1px solid #f0c36d;color:#7a4e00}
 .aviso.mal{background:#fdecea;border:1px solid #f1a6a0;color:#7b1d14}
@@ -304,13 +304,13 @@ function render() {
     { label:'Costo/t del día', data:s.map(x=>x.costoT), borderColor:'#2A3D7C', backgroundColor:'#2A3D7C', tension:.2, pointRadius:3 },
     { label:'Promedio obra', data:s.map(x=>x.acumCostoT), borderColor:'#3f57a6', borderDash:[6,4], pointRadius:0, tension:.2 },
     { label:'Precio pactado', data:s.map(()=>D.cfg.PRECIO_T), borderColor:'#0f766e', pointRadius:0, borderWidth:2 } ]},
-    options:{ plugins:{legend:{position:'bottom'}}, scales:{y:{title:{display:true,text:'USD/t'}}} } });
+    options:{ plugins:{legend:{position:'bottom'}, tooltip:ttDia}, scales:{y:{title:{display:true,text:'USD/t'}}} } });
   mk('chUtil', { type:'line', data:{ labels:lbl, datasets:[
     { label:'Utilidad del día', data:s.map(x=>x.utilidad), borderColor:'#0f766e', backgroundColor:'#0f766e', tension:.2, pointRadius:3 },
     { label:'Acumulada', data:s.map(x=>x.acumUtil), borderColor:'#2A3D7C', borderDash:[6,4], yAxisID:'y2', pointRadius:0, tension:.2 } ]},
-    options:{ plugins:{legend:{position:'bottom'}}, scales:{ y:{title:{display:true,text:'USD/día'}}, y2:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'USD acum.'}} } } });
+    options:{ plugins:{legend:{position:'bottom'}, tooltip:ttDia}, scales:{ y:{title:{display:true,text:'USD/día'}}, y2:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'USD acum.'}} } } });
   mk('chT', { type:'line', data:{ labels:lbl, datasets:[{ label:'t colocadas', data:s.map(x=>x.t), borderColor:'#3f57a6', backgroundColor:'rgba(63,87,166,.15)', fill:true, tension:.2, pointRadius:3 }]},
-    options:{ plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,title:{display:true,text:'t'}}} } });
+    options:{ plugins:{legend:{display:false}, tooltip:ttDia}, scales:{y:{beginAtZero:true,title:{display:true,text:'t'}}} } });
   simular(tProm);
   preview();
 }
@@ -397,18 +397,50 @@ function simular(tActual) {
   document.getElementById('simTxt').innerHTML = 'Con los costos vigentes (fijos ' + fmtUSD(b.fijoDia + b.combEstUSD) + '/día, flete ' + fmtUSD(b.fleteUSD) + ' cada ' + CAP + ' t). Los escalones son los viajes de mezcla. ' +
     (eq ? 'Se empieza a ganar desde <b>' + eq + ' t/día</b>.' : 'No se alcanza el equilibrio ni a 100 t/día.') + (act ? ' Promedio actual: <b>' + fmtN(tActual,1) + ' t/día</b>.' : '');
   const punto = (arr) => ts.map((t, i) => t === act ? arr[i] : null);
+  const detalleSim = t => { const v = Math.ceil(t / CAP), c = costoDe(t); return ['', 'Viajes de mezcla: ' + v + ' (' + fmtUSD(v * b.fleteUSD) + ')', 'Fijos + gasoil est.: ' + fmtUSD(b.fijoDia + b.combEstUSD), 'Puntas: ' + fmtUSD(t * b.puntasPorT), 'Costo del día: ' + fmtUSD(c) + ' → ' + fmtUSD2(c / t) + '/t', 'Facturación: ' + fmtUSD(t * P) + ' · Utilidad: ' + fmtUSD(t * P - c)]; };
+  const ttSim = { filter: it => it.parsed.y != null, callbacks:{ title: it => it.length ? it[0].label + ' t/día' : '', label: it => it.dataset.label.replace(/ \(.*\)/, '') + ': ' + (/Utilidad/.test(it.dataset.label) ? fmtUSD(it.parsed.y) : fmtUSD2(it.parsed.y)), afterBody: it => it.length ? detalleSim(Number(it[0].label)) : [] } };
   mk('chSimC', { type:'line', data:{ labels:ts, datasets:[
     { label:'Costo directo real (USD/t)', data:cT, borderColor:'#2A3D7C', stepped:true, pointRadius:0, borderWidth:2.5 },
     { label:'Precio pactado ' + fmtUSD2(P) + '/t', data:ts.map(()=>P), borderColor:'#0f766e', pointRadius:0, borderWidth:2.5 },
     { label:'Hoy (promedio)', data:punto(cT), borderColor:'#c0392b', backgroundColor:'#c0392b', pointRadius:6, pointHoverRadius:7, showLine:false } ]},
-    options:{ plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{title:i=>i[0].label + ' t/día'}}}, scales:{ x:{title:{display:true,text:'t de mezcla colocadas por día'}, ticks:{maxTicksLimit:10}}, y:{title:{display:true,text:'USD/t'}} } } });
+    options:{ plugins:{legend:{position:'bottom'}, tooltip:ttSim}, scales:{ x:{title:{display:true,text:'t de mezcla colocadas por día'}, ticks:{maxTicksLimit:10}}, y:{title:{display:true,text:'USD/t'}} } } });
   mk('chSimU', { type:'line', data:{ labels:ts, datasets:[
     { label:'Utilidad bruta (USD/día)', data:u, borderColor:'#0f766e', backgroundColor:'rgba(15,118,110,.15)', fill:{target:{value:0}, above:'rgba(15,118,110,.15)', below:'rgba(192,57,43,.12)'}, stepped:true, pointRadius:0, borderWidth:2.5 },
     { label:'Hoy (promedio)', data:punto(u), borderColor:'#c0392b', backgroundColor:'#c0392b', pointRadius:6, pointHoverRadius:7, showLine:false } ]},
-    options:{ plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{title:i=>i[0].label + ' t/día'}}}, scales:{ x:{title:{display:true,text:'t de mezcla colocadas por día'}, ticks:{maxTicksLimit:10}}, y:{title:{display:true,text:'USD/día'}} } } });
+    options:{ plugins:{legend:{position:'bottom'}, tooltip:ttSim}, scales:{ x:{title:{display:true,text:'t de mezcla colocadas por día'}, ticks:{maxTicksLimit:10}}, y:{title:{display:true,text:'USD/día'}} } } });
 }
 
-function mk(id, cfg) { if (charts[id]) charts[id].destroy(); cfg.options = Object.assign({responsive:true, maintainAspectRatio:false, animation:false}, cfg.options||{}); charts[id] = new Chart(document.getElementById(id), cfg); }
+function mk(id, cfg) {
+  if (charts[id]) charts[id].destroy();
+  cfg.options = Object.assign({ responsive:true, maintainAspectRatio:false, animation:false,
+    interaction:{ mode:'index', intersect:false }, hover:{ mode:'index', intersect:false } }, cfg.options||{});
+  cfg.options.plugins = cfg.options.plugins || {};
+  cfg.options.plugins.tooltip = Object.assign({ enabled:true, mode:'index', intersect:false, backgroundColor:'#1f2430', titleFont:{size:13,weight:'700'}, bodyFont:{size:12}, padding:10, displayColors:true, boxPadding:4 }, cfg.options.plugins.tooltip||{});
+  cfg.plugins = [lineaGuia];
+  charts[id] = new Chart(document.getElementById(id), cfg);
+}
+// línea vertical que sigue al dedo/mouse
+const lineaGuia = { id:'lineaGuia', afterDraw(c) {
+  const a = c.tooltip && c.tooltip.getActiveElements ? c.tooltip.getActiveElements() : [];
+  if (!a.length) return;
+  const x = a[0].element.x, ctx = c.ctx, y = c.chartArea;
+  ctx.save(); ctx.beginPath(); ctx.moveTo(x, y.top); ctx.lineTo(x, y.bottom); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(42,61,124,.45)'; ctx.setLineDash([4,4]); ctx.stroke(); ctx.restore();
+} };
+// detalle de un día para los tooltips de las series
+function detalleDia(i) {
+  const x = D.serie[i]; if (!x) return [];
+  return [
+    'Toneladas: ' + fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)'),
+    'Viajes de mezcla: ' + x.viajes,
+    'Combustible: ' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? ' (manual)' : x.combFuente === 'real' ? ' (' + fmtN(x.litros,0) + ' l real)' : ' (estimado)'),
+    'Fijos: ' + fmtUSD(x.fijos) + ' · Flete: ' + fmtUSD(x.flete) + ' · Puntas: ' + fmtUSD(x.puntas),
+    'Costo del día: ' + fmtUSD(x.costo) + ' → ' + fmtUSD2(x.costoT) + '/t',
+    'Facturación: ' + fmtUSD(x.fact) + ' · Utilidad: ' + fmtUSD(x.utilidad),
+    'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil),
+  ];
+}
+const ttDia = { callbacks:{ title: it => it.length ? fDiaL(D.serie[it[0].dataIndex].fecha) : '', label: it => it.dataset.label + ': ' + (it.dataset.yAxisID === 'y2' || /USD|Utilidad|Acumulada/.test(it.dataset.label) ? fmtUSD(it.parsed.y) : /Costo|Precio/.test(it.dataset.label) ? fmtUSD2(it.parsed.y) : fmtN(it.parsed.y,1) + ' t'), afterBody: it => it.length ? [''].concat(detalleDia(it[0].dataIndex)) : [] } };
+
 
 // ---------- carga ----------
 let jornada = 1;
