@@ -439,7 +439,7 @@ function detalleDia(i) {
     'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil),
   ];
 }
-const ttDia = { callbacks:{ title: it => it.length ? fDiaL(D.serie[it[0].dataIndex].fecha) : '', label: it => it.dataset.label + ': ' + (it.dataset.yAxisID === 'y2' || /USD|Utilidad|Acumulada/.test(it.dataset.label) ? fmtUSD(it.parsed.y) : /Costo|Precio/.test(it.dataset.label) ? fmtUSD2(it.parsed.y) : fmtN(it.parsed.y,1) + ' t'), afterBody: it => it.length ? [''].concat(detalleDia(it[0].dataIndex)) : [] } };
+const ttDia = { callbacks:{ title: it => it.length ? fDiaL(D.serie[it[0].dataIndex].fecha) : '', label: it => it.dataset.label + ': ' + (it.dataset.yAxisID === 'y2' || /USD|Utilidad|Acumulada/.test(it.dataset.label) ? fmtUSD(it.parsed.y) : /Costo|Precio|Promedio/.test(it.dataset.label) ? fmtUSD2(it.parsed.y) + '/t' : fmtN(it.parsed.y,1) + ' t'), afterBody: it => it.length ? [''].concat(detalleDia(it[0].dataIndex)) : [] } };
 
 
 // ---------- carga ----------
