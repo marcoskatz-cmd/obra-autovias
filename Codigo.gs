@@ -108,7 +108,8 @@ function setup() {
     ['COMB_CON_IVA', 1, '1 si el precio de la planilla de combustible incluye IVA'],
     ['COMB_DESDE', '2026-10-15', 'Desde qué fecha se toma el combustible real de la planilla de Leandro (antes: manual o estimado)'],
     ['COMB_EXCLUIR', 'camion batea', 'Equipos a excluir del combustible (separados por coma; contiene, sin tildes). El camión batea va dentro del flete'],
-    ['DIAS_MES', 22, 'Días laborables por mes (divide los alquileres)'],
+    ['DIAS_MES', 22, 'Días laborables por mes (divide los alquileres en el mes en curso)'],
+    ['OBRA_INICIO', '2026-10-07', 'Primer día de obra: desde acá corren los fijos todos los días hábiles'],
     ['PRECIO_T', 79.5, 'Precio pactado USD/t colocada sin IVA'],
     ['SOBREFRESADO', 1.08, 't fresadas por t colocada'],
     ['CAP_CAMION', 30, 't por viaje de mezcla'],
@@ -330,33 +331,45 @@ function getDatos(user) {
   }
   const puntasPorT = puntasJuegoUSD / vidaPuntas * Number(cfg.SOBREFRESADO);
 
-  // Alquileres mensuales: en meses cerrados se prorratean por los días realmente trabajados (jornada = 1);
-  // en el mes en curso, por DIAS_MES de CONFIG.
+  // ---- Calendario de obra: los fijos (alquileres, personal, señalización) corren TODOS los días hábiles
+  //      desde el inicio de la obra, se tire mezcla o no. Combustible, flete y puntas solo cuando hay producción.
   const hoy = Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
+  const porFecha = {}; dias.forEach(d => porFecha[d.fecha] = d);
+  const inicio = cfg.OBRA_INICIO ? (cfg.OBRA_INICIO instanceof Date ? Utilities.formatDate(cfg.OBRA_INICIO, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : String(cfg.OBRA_INICIO).trim()) : (dias.length ? dias[0].fecha : hoy);
+  const fin = dias.length && dias[dias.length - 1].fecha > hoy ? dias[dias.length - 1].fecha : hoy;
+  const esFinde = f => { const w = new Date(f + 'T12:00:00').getDay(); return w === 0 || w === 6; };
+  const calendario = [];
+  for (let d = new Date(inicio + 'T12:00:00'); ; d.setDate(d.getDate() + 1)) {
+    const f = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
+    if (f > fin) break;
+    if (!esFinde(f) || porFecha[f]) calendario.push(f);   // hábiles + fines de semana con carga
+  }
+  // Alquileres mensuales: mes cerrado → prorrateo por los días de obra de ese mes; mes en curso → DIAS_MES
   const meses = {};
-  dias.forEach(d => { const m = d.fecha.slice(0, 7); if (!meses[m]) meses[m] = { mes: m, trabajados: 0, cerrado: hoy.slice(0, 7) > m, equiposDia: eq.dia }; if (d.jornada) meses[m].trabajados++; });
-  Object.values(meses).forEach(m => { if (m.cerrado && m.trabajados > 0) m.equiposDia = eq.mes / m.trabajados; });
+  calendario.forEach(f => { const m = f.slice(0, 7); if (!meses[m]) meses[m] = { mes: m, diasObra: 0, conCarga: 0, cerrado: hoy.slice(0, 7) > m, equiposDia: eq.dia }; meses[m].diasObra++; if (porFecha[f] && porFecha[f].t > 0) meses[m].conCarga++; });
+  Object.values(meses).forEach(m => { if (m.cerrado && m.diasObra > 0) m.equiposDia = eq.mes / m.diasObra; });
 
-  let acum = { t: 0, costo: 0, fact: 0, dias: 0, comb: 0, flete: 0, fijos: 0, puntas: 0 };
-  const serie = dias.map(d => {
-    const jornada = d.jornada;
-    const mesInfo = meses[d.fecha.slice(0, 7)];
+  let acum = { t: 0, costo: 0, fact: 0, dias: 0, diasConCarga: 0, comb: 0, flete: 0, fijos: 0, puntas: 0 };
+  const serie = calendario.map(f => {
+    const d = porFecha[f] || { fecha: f, t: 0, viajes: null, obs: '', por: '', jornada: 0, combArs: null, sinCarga: true };
+    const jornada = d.sinCarga ? 0 : d.jornada;
+    const mesInfo = meses[f.slice(0, 7)];
     const equiposDiaUsado = mesInfo.cerrado ? mesInfo.equiposDia : eq.dia;
-    const fijos = (equiposDiaUsado + Number(cfg.MO_USD) + Number(cfg.SENAL_USD)) * jornada;
-    const c = (!combDesde || d.fecha >= combDesde) ? comb.porDia[d.fecha] : null;
-    const manual = d.combArs !== null && !isNaN(d.combArs);
+    const fijos = equiposDiaUsado + Number(cfg.MO_USD) + Number(cfg.SENAL_USD);   // siempre
+    const c = (!combDesde || f >= combDesde) ? comb.porDia[f] : null;
+    const manual = d.combArs !== null && d.combArs !== undefined && !isNaN(d.combArs);
     const combUSD = manual ? d.combArs / combDiv / TC : (c ? c.ars / combDiv / TC : combEstUSD * jornada);
     const combFuente = manual ? 'manual' : (c ? 'real' : 'estimado');
-    const viajes = d.viajes !== null ? d.viajes : Math.ceil(d.t / Number(cfg.CAP_CAMION));
+    const viajes = d.viajes !== null && d.viajes !== undefined ? d.viajes : Math.ceil(d.t / Number(cfg.CAP_CAMION));
     const flete = viajes * fleteUSD;
     const puntas = d.t * puntasPorT;
     const costo = fijos + combUSD + flete + puntas;
     const fact = d.t * Number(cfg.PRECIO_T);
-    acum.t += d.t; acum.costo += costo; acum.fact += fact; acum.dias += 1;
+    acum.t += d.t; acum.costo += costo; acum.fact += fact; acum.dias += 1; if (d.t > 0) acum.diasConCarga += 1;
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
-      fecha: d.fecha, t: d.t, viajes, jornada, obs: d.obs, por: d.por,
-      fijos, equiposDia: equiposDiaUsado, diasMes: mesInfo.cerrado ? mesInfo.trabajados : Number(cfg.DIAS_MES), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
+      fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), obs: d.obs, por: d.por,
+      fijos, equiposDia: equiposDiaUsado, diasMes: mesInfo.cerrado ? mesInfo.diasObra : Number(cfg.DIAS_MES), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,
     };
@@ -365,7 +378,7 @@ function getDatos(user) {
   return {
     cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE },
     base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_USD), senalDia: Number(cfg.SENAL_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
-    serie, acum, recambios, meses: Object.values(meses),
+    serie, acum, recambios, meses: Object.values(meses), inicio,
     combustible: comb.diag,
     user: user || '',
     hoy: Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'),

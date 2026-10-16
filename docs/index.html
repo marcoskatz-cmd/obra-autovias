@@ -120,7 +120,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
     <label>Fecha</label><input type="date" id="fFecha">
     <label>¿Trabajó la cuadrilla?</label>
     <div class="toggle"><button id="jSi" class="on">Sí, jornada normal</button><button id="jNo">No (lluvia / parada)</button></div>
-    <div class="hint">Si no trabajó, no se imputan equipos ni personal ese día. Si trabajó pero no colocó, cargá 0 t: los fijos corren igual.</div>
+    <div class="hint">Equipos y personal se pagan igual; marcar "No" solo evita imputar el gasoil estimado y deja registrado el motivo en observaciones.</div>
     <label>Toneladas colocadas</label><input type="number" id="fT" inputmode="decimal" min="0" max="500" step="0.5" placeholder="Ej: 60">
     <label>Viajes de mezcla <span class="small">(se calcula solo; corregí si el fletero facturó distinto)</span></label>
     <input type="number" id="fV" inputmode="numeric" min="0" max="20" step="1" placeholder="auto">
@@ -172,7 +172,8 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
       <dt>Viajes de mezcla</dt><dd>Se calculan solos (1 viaje cada 30 t, redondeando para arriba). Si el fletero facturó otra cantidad, corregilo en el campo.</dd>
       <dt>Combustible</dt><dd>Prioridad: el monto cargado a mano en el día (<span class="tag">manual</span>), si no la planilla de entregas de Leandro Casares filtrada por la obra (<span class="tag">litros</span>), y si no el estimado de Costos (<span class="tag est">est.</span>).</dd>
       <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
-      <dt>Alquileres mensuales</dt><dd>Mientras el mes está en curso se prorratean por los días laborables de Costos. Cuando el mes termina, se recalculan dividiendo por los días que realmente se trabajó ese mes (jornada normal), sean más o menos.</dd>
+      <dt>Costos fijos</dt><dd>Equipos alquilados, personal y señalización se pagan se tire o no: corren todos los días hábiles desde el inicio de la obra (fecha en Costos). Los días sin carga aparecen en los gráficos y en la tabla con su costo fijo. Combustible, flete y puntas solo se imputan cuando hay producción.</dd>
+      <dt>Alquileres mensuales</dt><dd>Mientras el mes está en curso se prorratean por los días laborables de Costos. Cuando el mes termina, se recalculan dividiendo por los días hábiles de obra que tuvo ese mes.</dd>
       <dt>Precios y parámetros</dt><dd>Pestaña <b>Costos</b>: tipo de cambio, precio pactado, flete, combustible estimado, personal, puntas, PIN y la lista de equipos alquilados. Todo recalcula al guardar.</dd>
       <dt>Qué muestra el panel</dt><dd><b>Costo/t hoy</b>: costo del último día cargado dividido sus toneladas. <b>Costo/t obra</b>: costo acumulado / toneladas acumuladas. <b>Utilidad</b>: facturación a precio pactado menos costo, sin gastos generales ni IVA.</dd>
       <dt>Acceso</dt><dd>Con el PIN de la obra (se cambia en Costos) o directo desde la app INGECO.</dd>
@@ -238,16 +239,15 @@ function render() {
   const s = D.serie, a = D.acum;
   // eje de calendario completo: del primer día cargado hasta hoy, con 0 t los días sin carga
   const porFecha = {}; s.forEach(x => porFecha[x.fecha] = x);
-  const CAL = []; if (s.length) { let d = new Date(s[0].fecha + 'T12:00:00'); const fin = D.hoy > s[s.length-1].fecha ? D.hoy : s[s.length-1].fecha; while (true) { const f = d.toISOString().slice(0,10); CAL.push(f); if (f >= fin) break; d.setDate(d.getDate() + 1); } }
+  const CAL = s.map(x => x.fecha);
   window.CAL = CAL;
   const lbl = CAL.map(fDia);
   const serieCal = fn => CAL.map(f => porFecha[f] ? fn(porFecha[f]) : null);
-  const esFinde = f => { const w = new Date(f + 'T12:00:00').getDay(); return w === 0 || w === 6; };
-  const colorPunto = base => CAL.map(f => porFecha[f] ? base : (esFinde(f) ? '#9ca3af' : '#c0392b'));
+  const colorPunto = base => CAL.map(f => porFecha[f].t > 0 ? base : (porFecha[f].jornada === 0 && !porFecha[f].sinCarga ? '#b9770e' : '#c0392b'));
   let acumPrev = null, ultCostoT = null;
   const acumCal = CAL.map(f => { if (porFecha[f]) acumPrev = porFecha[f].acumUtil; return acumPrev; });
   const promCal = CAL.map(f => { if (porFecha[f]) ultCostoT = porFecha[f].acumCostoT; return ultCostoT; });
-  const sinCarga = CAL.filter(f => !porFecha[f] && !esFinde(f) && f < D.hoy).length;
+  const sinCarga = s.filter(x => x.sinCarga && x.fecha < D.hoy).length;
   document.getElementById('who').textContent = D.user === 'PIN' ? 'Bacheo con fresado' : D.user;
   document.getElementById('upd').textContent = 'act. ' + new Date().toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
   document.getElementById('fFecha').value = D.hoy; document.getElementById('pFecha').value = D.hoy;
@@ -257,7 +257,7 @@ function render() {
   if (!D.combustible.ok) av += '<div class="aviso warn">⚠ ' + D.combustible.msg + '</div>';
   const sinComb = s.filter(x => !x.combReal && x.jornada).length;
   if (D.combustible.ok && sinComb) av += '<div class="aviso warn">' + sinComb + ' día(s) sin carga real de combustible: se usa el estimado.</div>';
-  if (sinCarga) av += '<div class="aviso warn">' + sinCarga + ' día(s) hábil(es) sin carga desde el inicio de la obra (punto rojo en los gráficos). Si fue parada, cargalo como "No trabajó" para que quede registrado.</div>';
+  if (sinCarga) av += '<div class="aviso warn">' + sinCarga + ' día(s) hábil(es) sin carga desde el ' + fDiaL(D.inicio) + ' (punto rojo): los fijos corrieron igual, ' + fmtUSD(s.filter(x => x.sinCarga).reduce((q, x) => q + x.fijos, 0)) + ' en total.</div>';
   (D.meses || []).filter(m => m.cerrado).forEach(m => { av += '<div class="aviso ok">Mes ' + m.mes.slice(5) + '/' + m.mes.slice(2,4) + ' cerrado: los alquileres se prorratearon por los ' + m.trabajados + ' días realmente trabajados.</div>'; });
   if (!D.base.vidaReal) av += '<div class="aviso warn">Vida de puntas estimada (' + fmtN(D.base.vidaPuntas,0) + ' t por juego). Registrá los recambios para calibrarla.</div>';
   document.getElementById('avisos').innerHTML = av;
@@ -272,10 +272,10 @@ function render() {
   const k = [
     ['Resultado de la obra', fmtUSD(utilObra), (utilObra >= 0 ? 'ganando' : 'perdiendo') + ' · facturado ' + fmtUSD(a.fact) + ' · costo ' + fmtUSD(a.costo), utilObra >= 0 ? 'ok' : 'mal', 'big'],
     ['Costo/t último día', ult ? fmtUSD2(ult.costoT) : '—', ult ? fDiaL(ult.fecha) + ' · ' + fmtN(ult.t,1) + ' t' : 'sin datos', ult && ult.costoT != null ? (ult.costoT <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
-    ['Costo/t promedio obra', fmtUSD2(costoObra), a.t ? fmtN(a.t,0) + ' t en ' + a.dias + ' días' : '', costoObra != null ? (costoObra <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
+    ['Costo/t promedio obra', fmtUSD2(costoObra), a.t ? fmtN(a.t,0) + ' t en ' + a.dias + ' días de obra' : '', costoObra != null ? (costoObra <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
     ['Utilidad último día', ult ? fmtUSD(ult.utilidad) : '—', 'precio ' + fmtUSD2(D.cfg.PRECIO_T) + '/t', ult ? (ult.utilidad >= 0 ? 'ok' : 'mal') : ''],
     ['Utilidad promedio/día', fmtUSD(utilProm), 'en ' + a.dias + ' días', utilProm != null ? (utilProm >= 0 ? 'ok' : 'mal') : ''],
-    ['Toneladas promedio/día', fmtN(tProm,1), 'total ' + fmtN(a.t,0) + ' t', ''],
+    ['Toneladas promedio/día', fmtN(a.diasConCarga ? a.t / a.diasConCarga : null,1), 'en ' + a.diasConCarga + ' días con carga · ' + fmtN(tProm,1) + ' t por día de obra', ''],
     ['Margen sobre facturación', margen == null ? '—' : fmtN(margen*100,1) + '%', 'facturado ' + fmtUSD(a.fact), margen != null ? (margen >= 0.1 ? 'ok' : margen >= 0 ? '' : 'mal') : ''],
     ['Punto de equilibrio', fmtN((D.base.fijoDia + D.base.combEstUSD) / (D.cfg.PRECIO_T - D.base.puntasPorT - D.base.fleteUSD / D.cfg.CAP),0) + ' t/día', 'con combustible estimado y flete prorrateado', ''],
     ['Costo fijo diario', fmtUSD(D.base.fijoDia + D.base.combEstUSD), 'equipos + MO + señal. + comb. est.', ''],
@@ -313,7 +313,7 @@ function render() {
 
   // tablas
   document.getElementById('tDias').innerHTML = '<tr><th>Fecha</th><th class="n">t</th><th class="n">Viajes</th><th class="n">Comb.</th><th class="n">Costo</th><th class="n">Costo/t</th><th class="n">Prom. obra</th><th class="n">Utilidad</th><th class="n">Acum.</th><th>Obs</th><th></th></tr>' +
-    [...s].reverse().map(x => '<tr><td>' + fDiaL(x.fecha) + (x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button onclick="editar(\'' + x.fecha + '\')" style="border:0;background:none;color:var(--azul);font-weight:600">editar</button></td></tr>').join('');
+    [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button onclick="editar(\'' + x.fecha + '\')" style="border:0;background:none;color:var(--azul);font-weight:600">editar</button></td></tr>').join('');
   document.getElementById('tPuntas').innerHTML = '<tr><th>Fecha</th><th class="n">Juegos</th><th>Obs</th></tr>' + (D.recambios.length ? D.recambios.map(r => '<tr><td>' + fDiaL(r.fecha) + '</td><td class="n">' + r.juegos + '</td><td>' + (r.obs||'') + '</td></tr>').join('') : '<tr><td colspan="3" class="small">Sin recambios registrados.</td></tr>');
 
   // charts
@@ -335,6 +335,7 @@ function render() {
 const CFG_CAMPOS = [
   ['Comercial', 'PRECIO_T', 'Precio pactado (USD/t colocada, sin IVA)', 'decimal'],
   ['Comercial', 'TC', 'Tipo de cambio ($ por USD)', 'decimal'],
+  ['Operación', 'OBRA_INICIO', 'Primer día de obra (AAAA-MM-DD): desde acá corren los fijos', 'text'],
   ['Operación', 'DIAS_MES', 'Días laborables por mes para prorratear alquileres en el mes en curso (al cerrar el mes se usan los días trabajados reales)', 'numeric'],
   ['Operación', 'CAP_CAMION', 'Toneladas por viaje de mezcla', 'decimal'],
   ['Operación', 'FLETE_ARS', 'Flete por viaje entero ($, sin IVA)', 'numeric'],
@@ -448,7 +449,8 @@ const lineaGuia = { id:'lineaGuia', afterDraw(c) {
 // detalle de un día para los tooltips de las series
 function detalleDia(i) {
   const f = window.CAL ? CAL[i] : null, x = f ? D.serie.find(z => z.fecha === f) : D.serie[i];
-  if (!x) { const w = f ? new Date(f + 'T12:00:00').getDay() : -1; return [f && (w === 0 || w === 6) ? 'Fin de semana' : 'Sin carga: no se tiró mezcla este día']; }
+  if (!x) return [];
+  if (x.sinCarga) return ['Sin carga: no se tiró mezcla este día', 'Fijos igual: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + ' + personal + señalización)', 'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil)];
   return [
     'Toneladas: ' + fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)'),
     'Viajes de mezcla: ' + x.viajes,
