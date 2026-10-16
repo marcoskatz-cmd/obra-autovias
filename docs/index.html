@@ -170,6 +170,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
       <dt>Viajes de mezcla</dt><dd>Se calculan solos (1 viaje cada 30 t, redondeando para arriba). Si el fletero facturó otra cantidad, corregilo en el campo.</dd>
       <dt>Combustible</dt><dd>Prioridad: el monto cargado a mano en el día (<span class="tag">manual</span>), si no la planilla de entregas de Leandro Casares filtrada por la obra (<span class="tag">litros</span>), y si no el estimado de Costos (<span class="tag est">est.</span>).</dd>
       <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
+      <dt>Alquileres mensuales</dt><dd>Mientras el mes está en curso se prorratean por los días laborables de Costos. Cuando el mes termina, se recalculan dividiendo por los días que realmente se trabajó ese mes (jornada normal), sean más o menos.</dd>
       <dt>Precios y parámetros</dt><dd>Pestaña <b>Costos</b>: tipo de cambio, precio pactado, flete, combustible estimado, personal, puntas, PIN y la lista de equipos alquilados. Todo recalcula al guardar.</dd>
       <dt>Qué muestra el panel</dt><dd><b>Costo/t hoy</b>: costo del último día cargado dividido sus toneladas. <b>Costo/t obra</b>: costo acumulado / toneladas acumuladas. <b>Utilidad</b>: facturación a precio pactado menos costo, sin gastos generales ni IVA.</dd>
       <dt>Acceso</dt><dd>Con el PIN de la obra (se cambia en Costos) o directo desde la app INGECO.</dd>
@@ -242,6 +243,7 @@ function render() {
   if (!D.combustible.ok) av += '<div class="aviso warn">⚠ ' + D.combustible.msg + '</div>';
   const sinComb = s.filter(x => !x.combReal && x.jornada).length;
   if (D.combustible.ok && sinComb) av += '<div class="aviso warn">' + sinComb + ' día(s) sin carga real de combustible: se usa el estimado.</div>';
+  (D.meses || []).filter(m => m.cerrado).forEach(m => { av += '<div class="aviso ok">Mes ' + m.mes.slice(5) + '/' + m.mes.slice(2,4) + ' cerrado: los alquileres se prorratearon por los ' + m.trabajados + ' días realmente trabajados.</div>'; });
   if (!D.base.vidaReal) av += '<div class="aviso warn">Vida de puntas estimada (' + fmtN(D.base.vidaPuntas,0) + ' t por juego). Registrá los recambios para calibrarla.</div>';
   document.getElementById('avisos').innerHTML = av;
 
@@ -318,7 +320,7 @@ function render() {
 const CFG_CAMPOS = [
   ['Comercial', 'PRECIO_T', 'Precio pactado (USD/t colocada, sin IVA)', 'decimal'],
   ['Comercial', 'TC', 'Tipo de cambio ($ por USD)', 'decimal'],
-  ['Operación', 'DIAS_MES', 'Días laborables por mes (prorratea alquileres)', 'numeric'],
+  ['Operación', 'DIAS_MES', 'Días laborables por mes para prorratear alquileres en el mes en curso (al cerrar el mes se usan los días trabajados reales)', 'numeric'],
   ['Operación', 'CAP_CAMION', 'Toneladas por viaje de mezcla', 'decimal'],
   ['Operación', 'FLETE_ARS', 'Flete por viaje entero ($, sin IVA)', 'numeric'],
   ['Operación', 'SOBREFRESADO', 't fresadas por t colocada', 'decimal'],
@@ -436,7 +438,7 @@ function detalleDia(i) {
     'Viajes de mezcla: ' + x.viajes,
     'Combustible: ' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? ' (manual)' : x.combFuente === 'real' ? ' (' + fmtN(x.litros,0) + ' l real)' : ' (estimado)'),
   ].concat((x.combDet || []).map(r => '   · ' + (r.equipo || 'sin equipo') + ': ' + fmtN(r.litros,0) + ' l')).concat([
-    'Fijos: ' + fmtUSD(x.fijos) + ' · Flete: ' + fmtUSD(x.flete) + ' · Puntas: ' + fmtUSD(x.puntas),
+    'Fijos: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + '/día' + (x.mesCerrado ? ', mes cerrado ÷ ' + x.diasMes + ' días trabajados' : ', ÷ ' + x.diasMes + ' días/mes') + ') · Flete: ' + fmtUSD(x.flete) + ' · Puntas: ' + fmtUSD(x.puntas),
     'Costo del día: ' + fmtUSD(x.costo) + ' → ' + fmtUSD2(x.costoT) + '/t',
     'Facturación: ' + fmtUSD(x.fact) + ' · Utilidad: ' + fmtUSD(x.utilidad),
     'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil),
