@@ -169,7 +169,7 @@ function leerConfig_() {
 function leerConfigCompleta_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sc = ss.getSheetByName(TABS.CONFIG);
-  const config = sc.getLastRow() > 1 ? sc.getRange(2, 1, sc.getLastRow() - 1, 3).getValues().filter(r => r[0]).map(r => ({ clave: String(r[0]), valor: r[1], desc: String(r[2] || '') })) : [];
+  const config = sc.getLastRow() > 1 ? sc.getRange(2, 1, sc.getLastRow() - 1, 3).getValues().filter(r => r[0]).map(r => ({ clave: String(r[0]), valor: r[1] instanceof Date ? Utilities.formatDate(r[1], 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : r[1], desc: String(r[2] || '') })) : [];
   const se = ss.getSheetByName(TABS.EQUIPOS);
   const equipos = se.getLastRow() > 1 ? se.getRange(2, 1, se.getLastRow() - 1, 5).getValues().filter(r => r[0]).map(r => ({ equipo: String(r[0]), precio: Number(r[1]) || 0, moneda: r[2] === 'USD' ? 'USD' : 'ARS', conIva: Number(r[3]) === 1 ? 1 : 0, obs: String(r[4] || '') })) : [];
   return { config, equipos };
