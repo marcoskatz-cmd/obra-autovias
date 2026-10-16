@@ -106,6 +106,8 @@ function setup() {
     ['TC', 1540, 'Tipo de cambio $/USD'],
     ['IVA', 0.21, 'IVA para netear'],
     ['COMB_CON_IVA', 1, '1 si el precio de la planilla de combustible incluye IVA'],
+    ['COMB_DESDE', '2026-10-15', 'Desde qué fecha se toma el combustible real de la planilla de Leandro (antes: manual o estimado)'],
+    ['COMB_EXCLUIR', 'camion batea', 'Equipos a excluir del combustible (separados por coma; contiene, sin tildes). El camión batea va dentro del flete'],
     ['DIAS_MES', 22, 'Días laborables por mes (divide los alquileres)'],
     ['PRECIO_T', 79.5, 'Precio pactado USD/t colocada sin IVA'],
     ['SOBREFRESADO', 1.08, 't fresadas por t colocada'],
@@ -234,10 +236,13 @@ function combustiblePorDia_(cfg) {
     const faltan = [['FECHA', iF], ['CANTIDAD (L)', iL], ['PRECIO TOTAL', iT], ['OBRA GENERAL', iO]].filter(x => x[1] < 0).map(x => x[0]);
     if (faltan.length) throw new Error('Faltan columnas en la planilla de combustible: ' + faltan.join(', '));
     const clave = sinTildes_(cfg.OBRA_COMBUSTIBLE);
+    const excluir = String(cfg.COMB_EXCLUIR || '').split(',').map(sinTildes_).filter(Boolean);
+    let excluidos = 0;
     for (let i = 1; i < data.length; i++) {
       const r = data[i];
       const obra = sinTildes_(r[iO]), lugar = sinTildes_(iLug >= 0 ? r[iLug] : '');
       if (!clave || (!obra.includes(clave) && !lugar.includes(clave))) continue;
+      if (excluir.length) { const fila = sinTildes_(r.map(v => String(v || '')).join(' | ')); if (excluir.some(x => fila.includes(x))) { excluidos++; continue; } }
       const d = aFecha_(r[iF]); if (!d) continue;
       const k = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
       const litros = Number(r[iL]) || 0;
@@ -247,7 +252,7 @@ function combustiblePorDia_(cfg) {
       out[k].registros.push({ equipo: String(iEq >= 0 ? r[iEq] : ''), litros, ars });
     }
     const total = Object.keys(out).length;
-    diag.msg = total ? (total + ' días con carga de combustible para "' + cfg.OBRA_COMBUSTIBLE + '"') : ('Sin registros para "' + cfg.OBRA_COMBUSTIBLE + '" en la planilla de Leandro. Verificá CONFIG > OBRA_COMBUSTIBLE.');
+    diag.msg = total ? (total + ' días con carga de combustible para "' + cfg.OBRA_COMBUSTIBLE + '"' + (excluidos ? ' (' + excluidos + ' registros excluidos: ' + cfg.COMB_EXCLUIR + ')' : '')) : ('Sin registros para "' + cfg.OBRA_COMBUSTIBLE + '" en la planilla de Leandro. Verificá CONFIG > OBRA_COMBUSTIBLE.');
     if (!total) diag.ok = false;
   } catch (e) { diag = { ok: false, msg: 'No se pudo leer combustible: ' + e.message }; }
   return { porDia: out, diag };
@@ -295,6 +300,7 @@ function getDatos(user) {
   const puntasJuegoUSD = Number(cfg.PUNTAS_JUEGO_ARS) / (1 + IVA) / TC;
   const comb = combustiblePorDia_(cfg);
   const combDiv = Number(cfg.COMB_CON_IVA) === 1 ? (1 + IVA) : 1;
+  const combDesde = cfg.COMB_DESDE ? (cfg.COMB_DESDE instanceof Date ? Utilities.formatDate(cfg.COMB_DESDE, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : String(cfg.COMB_DESDE).trim()) : '';
 
   // puntas: vida real si hay recambios, sino estimado
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -328,7 +334,7 @@ function getDatos(user) {
   const serie = dias.map(d => {
     const jornada = d.jornada;
     const fijos = fijoDia * jornada;
-    const c = comb.porDia[d.fecha];
+    const c = (!combDesde || d.fecha >= combDesde) ? comb.porDia[d.fecha] : null;
     const manual = d.combArs !== null && !isNaN(d.combArs);
     const combUSD = manual ? d.combArs / combDiv / TC : (c ? c.ars / combDiv / TC : combEstUSD * jornada);
     const combFuente = manual ? 'manual' : (c ? 'real' : 'estimado');
@@ -341,7 +347,7 @@ function getDatos(user) {
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
       fecha: d.fecha, t: d.t, viajes, jornada, obs: d.obs, por: d.por,
-      fijos, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, flete, puntas,
+      fijos, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,
     };

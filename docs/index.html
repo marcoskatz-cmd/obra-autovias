@@ -325,6 +325,8 @@ const CFG_CAMPOS = [
   ['Combustible', 'COMB_ESTIMADO_ARS', 'Gasoil estimado por día ($) si no hay dato real', 'numeric'],
   ['Combustible', 'COMB_CON_IVA', 'Los montos de combustible incluyen IVA (1 = sí, 0 = no)', 'numeric'],
   ['Combustible', 'IVA', 'IVA (0,21)', 'decimal'],
+  ['Combustible', 'COMB_DESDE', 'Desde qué fecha se toma el real de Leandro (AAAA-MM-DD)', 'text'],
+  ['Combustible', 'COMB_EXCLUIR', 'Equipos a excluir del combustible (coma). El camión batea va en el flete', 'text'],
   ['Combustible', 'OBRA_COMBUSTIBLE', 'Texto con que Leandro identifica la obra en su planilla', 'text'],
   ['Personal', 'MO_USD', 'Mano de obra por día (USD)', 'decimal'],
   ['Personal', 'SENAL_USD', 'Señalización por día (USD)', 'decimal'],
@@ -433,11 +435,12 @@ function detalleDia(i) {
     'Toneladas: ' + fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)'),
     'Viajes de mezcla: ' + x.viajes,
     'Combustible: ' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? ' (manual)' : x.combFuente === 'real' ? ' (' + fmtN(x.litros,0) + ' l real)' : ' (estimado)'),
+  ].concat((x.combDet || []).map(r => '   · ' + (r.equipo || 'sin equipo') + ': ' + fmtN(r.litros,0) + ' l')).concat([
     'Fijos: ' + fmtUSD(x.fijos) + ' · Flete: ' + fmtUSD(x.flete) + ' · Puntas: ' + fmtUSD(x.puntas),
     'Costo del día: ' + fmtUSD(x.costo) + ' → ' + fmtUSD2(x.costoT) + '/t',
     'Facturación: ' + fmtUSD(x.fact) + ' · Utilidad: ' + fmtUSD(x.utilidad),
     'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil),
-  ];
+  ]);
 }
 const ttDia = { callbacks:{ title: it => it.length ? fDiaL(D.serie[it[0].dataIndex].fecha) : '', label: it => it.dataset.label + ': ' + (it.dataset.yAxisID === 'y2' || /USD|Utilidad|Acumulada/.test(it.dataset.label) ? fmtUSD(it.parsed.y) : /Costo|Precio|Promedio/.test(it.dataset.label) ? fmtUSD2(it.parsed.y) + '/t' : fmtN(it.parsed.y,1) + ' t'), afterBody: it => it.length ? [''].concat(detalleDia(it[0].dataIndex)) : [] } };
 
