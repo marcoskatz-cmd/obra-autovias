@@ -257,9 +257,7 @@ function render() {
   if (!D.combustible.ok) av += '<div class="aviso warn">⚠ ' + D.combustible.msg + '</div>';
   const sinComb = s.filter(x => !x.combReal && x.jornada).length;
   if (D.combustible.ok && sinComb) av += '<div class="aviso warn">' + sinComb + ' día(s) sin carga real de combustible: se usa el estimado.</div>';
-  if (sinCarga) av += '<div class="aviso warn">' + sinCarga + ' día(s) hábil(es) sin carga desde el ' + fDiaL(D.inicio) + ' (punto rojo): los fijos corrieron igual, ' + fmtUSD(s.filter(x => x.sinCarga).reduce((q, x) => q + x.fijos, 0)) + ' en total.</div>';
   (D.meses || []).filter(m => m.cerrado).forEach(m => { av += '<div class="aviso ok">Mes ' + m.mes.slice(5) + '/' + m.mes.slice(2,4) + ' cerrado: los alquileres se prorratearon por los ' + m.trabajados + ' días realmente trabajados.</div>'; });
-  if (!D.base.vidaReal) av += '<div class="aviso warn">Vida de puntas estimada (' + fmtN(D.base.vidaPuntas,0) + ' t por juego). Registrá los recambios para calibrarla.</div>';
   document.getElementById('avisos').innerHTML = av;
 
   // KPIs
