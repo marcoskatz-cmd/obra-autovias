@@ -383,7 +383,46 @@ function guardarDia(p, user) {
   if (sh.getLastColumn() < 8) sh.getRange(1, 8).setValue('COMBUSTIBLE_ARS').setFontWeight('bold');
   if (fila > 0) sh.getRange(fila, 1, 1, 8).setValues([row]);
   else sh.appendRow(row);
-  return { ok: true, editado: fila > 0 };
+  let aviso = null;
+  try { aviso = avisarProduccion_(fecha, user); } catch (err) { aviso = { ok: false, error: String(err.message || err) }; }
+  return { ok: true, editado: fila > 0, aviso };
+}
+
+// ---------- Aviso por la app INGECO cuando se carga la producción del día ----------
+const fmtUSD_ = v => (v < 0 ? '-' : '') + 'USD ' + Math.round(Math.abs(v)).toLocaleString('es-AR');
+const fmtT_ = v => (Math.round(v * 10) / 10).toLocaleString('es-AR');
+const fmtFechaAR_ = f => f.slice(8, 10) + '/' + f.slice(5, 7);
+
+/** Arma los KPI del día y del acumulado y los manda a todos los que tienen el módulo AUTOVIAS en la app INGECO. */
+function avisarProduccion_(fecha, user) {
+  const clave = PropertiesService.getScriptProperties().getProperty('CLAVE_AUTOVIAS');
+  if (!clave) return { ok: false, error: 'Sin CLAVE_AUTOVIAS' };
+  const datos = getDatos(user);
+  const d = datos.serie.find(x => x.fecha === fecha);
+  if (!d) return { ok: false, error: 'día no encontrado' };
+  const precio = datos.cfg.PRECIO_T, ac = datos.acum, base = datos.base;
+  const variablePorT = base.puntasPorT + base.fleteUSD / Math.max(1, datos.cfg.CAP);
+  const equilibrio = (base.fijoDia + d.comb) / Math.max(0.01, precio - variablePorT);
+  const promTDia = ac.dias ? ac.t / ac.dias : 0;
+  const titulo = 'Autovías ' + fmtFechaAR_(fecha) + ': ' + fmtT_(d.t) + ' t colocadas · utilidad ' + fmtUSD_(d.utilidad);
+  const cuerpo = [
+    'DÍA ' + fmtFechaAR_(fecha) + (d.jornada ? '' : ' (sin jornada)') + ': ' + fmtT_(d.t) + ' t · ' + d.viajes + ' viajes · costo ' + (d.costoT !== null ? fmtUSD_(d.costoT) + '/t' : '—') + ' (pactado USD ' + precio + '/t) · utilidad ' + fmtUSD_(d.utilidad),
+    'Combustible: ' + (d.combFuente === 'manual' ? 'cargado a mano' : d.combFuente === 'real' ? 'planilla de combustible' : 'estimado') + ' · equilibrio hoy ≈ ' + fmtT_(equilibrio) + ' t/día',
+    'ACUMULADO: ' + fmtT_(ac.t) + ' t en ' + ac.dias + ' días (' + fmtT_(promTDia) + ' t/día) · costo ' + (ac.t ? fmtUSD_(ac.costo / ac.t) + '/t' : '—') + ' · utilidad ' + fmtUSD_(ac.fact - ac.costo),
+    'Cargó: ' + user
+  ].join('\n');
+  const r = UrlFetchApp.fetch(APP_INGECO_BACKEND, {
+    method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
+    payload: JSON.stringify({
+      accion: 'notificar', clave_sistema: clave, modulo: MODULO_INGECO,
+      destinatarios: [{ con_modulo: MODULO_INGECO }, { admin: true }],
+      tipo: 'aviso_general', titulo: titulo.slice(0, 120), cuerpo: cuerpo.slice(0, 600),
+      url_destino: 'https://marcoskatz-cmd.github.io/obra-autovias/', prioridad: 'normal',
+      clave_unica: 'prod-' + fecha + '-' + d.t + '-' + d.viajes + '-' + Math.round(d.utilidad), dias_unica: 1
+    })
+  });
+  let j = {}; try { j = JSON.parse(r.getContentText()); } catch (e) { }
+  return j.ok ? { ok: true, destinatarios: (j.avisos || []).length } : { ok: false, error: r.getContentText().slice(0, 160) };
 }
 
 function guardarPuntas(p, user) {
