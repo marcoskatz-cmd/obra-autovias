@@ -63,12 +63,15 @@ main{padding:14px;max-width:1200px;margin:0 auto}
 .sec{display:none}.sec.on{display:block}
 .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
 @media(min-width:700px){.kpis{grid-template-columns:repeat(4,1fr)}}
-@media(min-width:1200px){#kpis{grid-template-columns:repeat(8,1fr)}}
+@media(min-width:1200px){#kpis{grid-template-columns:repeat(10,1fr)}}
 .kpi{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:12px}
 .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;font-weight:600}
 .kpi .v{font-size:24px;font-weight:700;margin-top:4px;color:var(--azul)}
 .kpi .s{font-size:12px;color:#6b7280;margin-top:2px}
 .kpi.ok .v{color:var(--ok)}.kpi.mal .v{color:var(--mal)}
+.kpi.big{grid-column:1/-1;border-width:2px}.kpi.big .v{font-size:34px}.kpi.big.ok{border-color:var(--ok);background:#f0f9f8}.kpi.big.mal{border-color:var(--mal);background:#fdf3f2}
+@media(min-width:700px){.kpi.big{grid-column:span 2}}
+@media(min-width:1200px){.kpi.big{grid-column:span 2}}
 .card{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
 .card h3{margin:0 0 10px;font-size:14px;color:var(--azul)}
 canvas{width:100%!important;max-height:280px;touch-action:pan-y}
@@ -275,16 +278,17 @@ function render() {
   const tProm = a.dias ? a.t / a.dias : null;
   const margen = a.fact > 0 ? utilObra / a.fact : null;
   const k = [
+    ['Resultado de la obra', fmtUSD(utilObra), (utilObra >= 0 ? 'ganando' : 'perdiendo') + ' · facturado ' + fmtUSD(a.fact) + ' · costo ' + fmtUSD(a.costo), utilObra >= 0 ? 'ok' : 'mal', 'big'],
     ['Costo/t último día', ult ? fmtUSD2(ult.costoT) : '—', ult ? fDiaL(ult.fecha) + ' · ' + fmtN(ult.t,1) + ' t' : 'sin datos', ult && ult.costoT != null ? (ult.costoT <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
     ['Costo/t promedio obra', fmtUSD2(costoObra), a.t ? fmtN(a.t,0) + ' t en ' + a.dias + ' días' : '', costoObra != null ? (costoObra <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
     ['Utilidad último día', ult ? fmtUSD(ult.utilidad) : '—', 'precio ' + fmtUSD2(D.cfg.PRECIO_T) + '/t', ult ? (ult.utilidad >= 0 ? 'ok' : 'mal') : ''],
-    ['Utilidad promedio/día', fmtUSD(utilProm), 'acumulada ' + fmtUSD(utilObra), utilProm != null ? (utilProm >= 0 ? 'ok' : 'mal') : ''],
+    ['Utilidad promedio/día', fmtUSD(utilProm), 'en ' + a.dias + ' días', utilProm != null ? (utilProm >= 0 ? 'ok' : 'mal') : ''],
     ['Toneladas promedio/día', fmtN(tProm,1), 'total ' + fmtN(a.t,0) + ' t', ''],
     ['Margen sobre facturación', margen == null ? '—' : fmtN(margen*100,1) + '%', 'facturado ' + fmtUSD(a.fact), margen != null ? (margen >= 0.1 ? 'ok' : margen >= 0 ? '' : 'mal') : ''],
     ['Punto de equilibrio', fmtN((D.base.fijoDia + D.base.combEstUSD) / (D.cfg.PRECIO_T - D.base.puntasPorT - D.base.fleteUSD / D.cfg.CAP),0) + ' t/día', 'con combustible estimado y flete prorrateado', ''],
     ['Costo fijo diario', fmtUSD(D.base.fijoDia + D.base.combEstUSD), 'equipos + MO + señal. + comb. est.', ''],
   ];
-  document.getElementById('kpis').innerHTML = k.map(x => '<div class="kpi ' + x[3] + '"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
+  document.getElementById('kpis').innerHTML = k.map(x => '<div class="kpi ' + x[3] + (x[4] ? ' ' + x[4] : '') + '"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
 
   // estructura
   if (a.costo > 0) {
