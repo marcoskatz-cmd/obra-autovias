@@ -155,7 +155,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
     <div class="hint">Tocá un grupo para abrirlo. Los cambios se aplican al guardar y recalculan todo el panel.</div>
     <div id="cfgForm"></div>
     <details class="grp" id="grpEq"><summary>Equipos alquilados <span class="small" id="eqCount"></span></summary>
-      <div class="hint">Precio mensual de cada equipo; los propios van en 0. Se prorratea por los días laborables del mes.</div>
+      <div class="hint">Precio mensual de cada equipo; los propios van en 0. Se prorratea por los días laborables del mes. "Cuenta desde" es el primer día que se imputa ese alquiler (vacío = desde el inicio de obra); los días anteriores van sin costo.</div>
       <div id="eqList"></div>
       <button class="btn sec2" onclick="agregarEquipo()">+ Agregar equipo</button>
     </details>
@@ -172,7 +172,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
       <dt>Viajes de mezcla</dt><dd>Se calculan solos (1 viaje cada 30 t, redondeando para arriba). Si el fletero facturó otra cantidad, corregilo en el campo.</dd>
       <dt>Combustible</dt><dd>Prioridad: el monto cargado a mano en el día (<span class="tag">manual</span>), si no la planilla de entregas de Leandro Casares filtrada por la obra (<span class="tag">litros</span>), y si no el estimado de Costos (<span class="tag est">est.</span>).</dd>
       <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
-      <dt>Costos fijos</dt><dd>Equipos alquilados, personal y señalización se pagan se tire o no: corren todos los días hábiles desde el inicio de la obra (fecha en Costos). Los días sin carga aparecen en los gráficos y en la tabla con su costo fijo. Combustible, flete y puntas solo se imputan cuando hay producción.</dd>
+      <dt>Costos fijos</dt><dd>Equipos alquilados, personal y señalización se pagan se tire o no: corren todos los días hábiles desde el inicio de la obra (fecha en Costos). Cada equipo puede tener su propia fecha "cuenta desde" (en Autovías todo menos la fresadora arrancó a contar el martes 13/10; los días previos fueron sin costo). Los días sin carga aparecen en los gráficos y en la tabla con su costo fijo. Combustible, flete y puntas solo se imputan cuando hay producción.</dd>
       <dt>Alquileres mensuales</dt><dd>Mientras el mes está en curso se prorratean por los días laborables de Costos. Cuando el mes termina, se recalculan dividiendo por los días hábiles de obra que tuvo ese mes.</dd>
       <dt>Precios y parámetros</dt><dd>Pestaña <b>Costos</b>: tipo de cambio, precio pactado, flete, combustible estimado, personal, puntas, PIN y la lista de equipos alquilados. Todo recalcula al guardar.</dd>
       <dt>Qué muestra el panel</dt><dd><b>Costo/t hoy</b>: costo del último día cargado dividido sus toneladas. <b>Costo/t obra</b>: costo acumulado / toneladas acumuladas. <b>Utilidad</b>: facturación a precio pactado menos costo, sin gastos generales ni IVA.</dd>
@@ -221,6 +221,7 @@ const fmtUSD2 = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-A
 const fmtN = (v, d=1) => v == null ? '—' : Number(v).toLocaleString('es-AR', {maximumFractionDigits:d});
 const fDia = s => { const [y,m,d] = s.split('-'); return d + '/' + m; };
 const fDiaL = s => { const [y,m,d] = s.split('-'); return d + '/' + m + '/' + y.slice(2); };
+const eqN = x => (x.equiposN != null && D && D.equiposTotal && x.equiposN < D.equiposTotal) ? ', ' + x.equiposN + ' de ' + D.equiposTotal + ' equipos contando' : '';
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('on')); b.classList.add('on');
@@ -297,7 +298,7 @@ function render() {
   ].map(x => '<div class="kpi"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
   document.getElementById('baseCostos').innerHTML = '<table>' +
     '<tr class="sec"><td>Equipos alquilados</td><td class="n">por mes</td><td class="n">por día</td></tr>' +
-    b.equipos.map(x => '<tr><td>' + x.equipo + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes) : '<span class="small">propio</span>') + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes / dm) : '') + '</td></tr>').join('') +
+    b.equipos.map(x => '<tr><td>' + x.equipo + (x.desde ? ' <span class="small">desde ' + fDia(x.desde) + '</span>' : '') + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes) : '<span class="small">propio</span>') + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes / dm) : '') + '</td></tr>').join('') +
     '<tr class="tot"><td>Equipos (' + fmtN(dm,0) + ' días/mes)</td><td class="n">' + fmtUSD(b.equiposMes) + '</td><td class="n">' + fmtUSD(b.equiposDia) + '</td></tr>' +
     '<tr class="sec"><td>Otros fijos</td><td></td><td class="n">por día</td></tr>' +
     '<tr><td>Mano de obra</td><td></td><td class="n">' + fmtUSD(b.moDia) + '</td></tr>' +
@@ -380,7 +381,8 @@ function renderEquipos() {
     '<div class="row"><div><label>Precio por mes</label><input type="number" inputmode="numeric" min="0" step="any" placeholder="0 = propio" value="' + e.precio + '" oninput="EQ[' + i + '].precio=this.value;sumEq(' + i + ');dirty()"></div>' +
     '<div style="flex:.6"><label>Moneda</label><select onchange="EQ[' + i + '].moneda=this.value;sumEq(' + i + ');dirty()"><option' + (e.moneda === 'ARS' ? ' selected' : '') + '>ARS</option><option' + (e.moneda === 'USD' ? ' selected' : '') + '>USD</option></select></div>' +
     '<div style="flex:.8"><label>IVA</label><select onchange="EQ[' + i + '].conIva=Number(this.value);sumEq(' + i + ');dirty()"><option value="0"' + (e.conIva ? '' : ' selected') + '>sin IVA</option><option value="1"' + (e.conIva ? ' selected' : '') + '>incluido</option></select></div></div>' +
-    '<label>Observación <span class="small">(opcional)</span></label><input type="text" value="' + (e.obs || '').replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].obs=this.value;dirty()">' +
+    '<div class="row"><div><label>Cuenta desde <span class="small">(vacío = inicio de obra)</span></label><input type="date" value="' + (e.desde || '') + '" onchange="EQ[' + i + '].desde=this.value;dirty()"></div>' +
+    '<div><label>Observación <span class="small">(opcional)</span></label><input type="text" value="' + (e.obs || '').replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].obs=this.value;dirty()"></div></div>' +
     '<div class="sum" id="eqSum' + i + '"></div>' +
     '<button class="del" onclick="EQ.splice(' + i + ',1);renderEquipos();dirty()">Quitar equipo</button></div>').join('');
   EQ.forEach((e, i) => sumEq(i));
@@ -390,7 +392,7 @@ function sumEq(i) {
   let usd = e.moneda === 'USD' ? Number(e.precio) : Number(e.precio) / tc; if (Number(e.conIva) === 1) usd = usd / (1 + iva);
   const el = document.getElementById('eqSum' + i); if (el) el.textContent = usd > 0 ? '= ' + fmtUSD(usd) + '/mes · ' + fmtUSD(usd / dm) + '/día' : 'propio / sin costo';
 }
-function agregarEquipo() { EQ.push({ equipo: '', precio: 0, moneda: 'ARS', conIva: 0, obs: '' }); renderEquipos(); dirty(); const l = document.querySelectorAll('.eq'); l[l.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' }); l[l.length - 1].querySelector('input').focus(); }
+function agregarEquipo() { EQ.push({ equipo: '', precio: 0, moneda: 'ARS', conIva: 0, obs: '', desde: '' }); renderEquipos(); dirty(); const l = document.querySelectorAll('.eq'); l[l.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' }); l[l.length - 1].querySelector('input').focus(); }
 function guardarConfig() {
   const config = {};
   document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) config[i.dataset.k] = i.value; });
@@ -448,13 +450,13 @@ const lineaGuia = { id:'lineaGuia', afterDraw(c) {
 function detalleDia(i) {
   const f = window.CAL ? CAL[i] : null, x = f ? D.serie.find(z => z.fecha === f) : D.serie[i];
   if (!x) return [];
-  if (x.sinCarga) return ['Sin carga: no se tiró mezcla este día', 'Fijos igual: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + ' + personal + señalización)', 'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil)];
+  if (x.sinCarga) return ['Sin carga: no se tiró mezcla este día', 'Fijos igual: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + eqN(x) + ' + personal + señalización)', 'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil)];
   return [
     'Toneladas: ' + fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)'),
     'Viajes de mezcla: ' + x.viajes,
     'Combustible: ' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? ' (manual)' : x.combFuente === 'real' ? ' (' + fmtN(x.litros,0) + ' l real)' : ' (estimado)'),
   ].concat((x.combDet || []).map(r => '   · ' + (r.equipo || 'sin equipo') + ': ' + fmtN(r.litros,0) + ' l')).concat([
-    'Fijos: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + '/día' + (x.mesCerrado ? ', mes cerrado ÷ ' + x.diasMes + ' días trabajados' : ', ÷ ' + x.diasMes + ' días/mes') + ') · Flete: ' + fmtUSD(x.flete) + ' · Puntas: ' + fmtUSD(x.puntas),
+    'Fijos: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + '/día' + eqN(x) + (x.mesCerrado ? ', mes cerrado ÷ ' + x.diasMes + ' días trabajados' : ', ÷ ' + x.diasMes + ' días/mes') + ') · Flete: ' + fmtUSD(x.flete) + ' · Puntas: ' + fmtUSD(x.puntas),
     'Costo del día: ' + fmtUSD(x.costo) + ' → ' + fmtUSD2(x.costoT) + '/t',
     'Facturación: ' + fmtUSD(x.fact) + ' · Utilidad: ' + fmtUSD(x.utilidad),
     'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil),
