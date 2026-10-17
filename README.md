@@ -35,7 +35,10 @@ Panel de costo y utilidad diaria. Frontend en GitHub Pages + backend Apps Script
 ## Modelo de costo (por día cargado)
 
 ```
-fijos      = (Σ alquileres USD/mes ÷ DIAS_MES) + MO_USD + SENAL_USD      [× 0 si jornada = parada]
+fijos      = (Σ alquileres USD/mes ÷ DIAS_MES) + MO_USD + SENAL_USD
+             cada equipo suma solo desde su fecha DESDE (col. F de EQUIPOS; vacía = OBRA_INICIO).
+             Autovías: todo menos la fresadora cuenta desde el 2026-10-13; los días previos van sin costo.
+             (La columna DESDE se crea sola la primera vez que corre el backend nuevo sobre una planilla vieja.)
 combustible= manual del día | real de Leandro | COMB_ESTIMADO_ARS   (÷ (1+IVA si COMB_CON_IVA) ÷ TC)
 flete      = viajes × FLETE_ARS ÷ TC        viajes = ceil(t ÷ CAP_CAMION) salvo carga manual
 puntas     = t × (PUNTAS_JUEGO_ARS ÷ 1,21 ÷ TC ÷ vida) × SOBREFRESADO

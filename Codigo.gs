@@ -12,6 +12,11 @@ const HOJA_ENTREGAS = 'ENTREGAS';
 
 const TABS = { CONFIG: 'CONFIG', PROD: 'PRODUCCION', PUNTAS: 'PUNTAS', EQUIPOS: 'EQUIPOS' };
 
+// Acuerdo con los proveedores: los alquileres (salvo la fresadora) se cuentan desde el martes 13-oct-2026;
+// los días previos fueron sin costo. Se aplica solo una vez, al agregar la columna DESDE a planillas viejas.
+const EQUIPOS_DESDE_DEFAULT = '2026-10-13';
+const EQUIPOS_DESDE_EXCEPTO = ['fresa'];
+
 // ---------- Web app ----------
 // El frontend vive en GitHub Pages; este /exec solo expone la API JSON (doPost).
 const URL_APP = 'https://marcoskatz-cmd.github.io/obra-autovias/';
@@ -125,19 +130,21 @@ function setup() {
 
   let eq = ss.getSheetByName(TABS.EQUIPOS) || ss.insertSheet(TABS.EQUIPOS);
   eq.clear();
-  eq.getRange(1, 1, 1, 5).setValues([['EQUIPO', 'PRECIO MES', 'MONEDA', 'CON IVA (1/0)', 'OBS']]).setFontWeight('bold');
-  eq.getRange(2, 1, 11, 5).setValues([
-    ['Fresadora Bomag BM 1000/20', 24145150, 'ARS', 1, 'sin repuestos ni consumibles'],
-    ['Rodillo mixto 6 t', 7500000, 'ARS', 0, 'con maquinista'],
-    ['Minicargador', 6700000, 'ARS', 0, ''],
-    ['Retropala', 4000, 'USD', 0, ''],
-    ['Terminadora', 3000, 'USD', 0, 'con operario'],
-    ['Camión chasis apoyo', 6000000, 'ARS', 0, ''],
-    ['Camión volcador', 0, 'ARS', 0, 'propio'],
-    ['Acoplado liga', 1000000, 'ARS', 0, ''],
-    ['Camioneta', 3500000, 'ARS', 0, ''],
-    ['Minibús', 0, 'ARS', 0, 'propio'],
-    ['Camión regador', 0, 'ARS', 0, 'propio'],
+  eq.getRange(1, 1, 1, 6).setValues([['EQUIPO', 'PRECIO MES', 'MONEDA', 'CON IVA (1/0)', 'OBS', 'DESDE']]).setFontWeight('bold');
+  eq.getRange(1, 6, eq.getMaxRows(), 1).setNumberFormat('@');   // DESDE como texto AAAA-MM-DD
+  // DESDE: primer día que se imputa el alquiler (vacío = desde OBRA_INICIO). Todo menos la fresa arrancó a contar el martes 13-oct-2026.
+  eq.getRange(2, 1, 11, 6).setValues([
+    ['Fresadora Bomag BM 1000/20', 24145150, 'ARS', 1, 'sin repuestos ni consumibles', ''],
+    ['Rodillo mixto 6 t', 7500000, 'ARS', 0, 'con maquinista', EQUIPOS_DESDE_DEFAULT],
+    ['Minicargador', 6700000, 'ARS', 0, '', EQUIPOS_DESDE_DEFAULT],
+    ['Retropala', 4000, 'USD', 0, '', EQUIPOS_DESDE_DEFAULT],
+    ['Terminadora', 3000, 'USD', 0, 'con operario', EQUIPOS_DESDE_DEFAULT],
+    ['Camión chasis apoyo', 6000000, 'ARS', 0, '', EQUIPOS_DESDE_DEFAULT],
+    ['Camión volcador', 0, 'ARS', 0, 'propio', EQUIPOS_DESDE_DEFAULT],
+    ['Acoplado liga', 1000000, 'ARS', 0, '', EQUIPOS_DESDE_DEFAULT],
+    ['Camioneta', 3500000, 'ARS', 0, '', EQUIPOS_DESDE_DEFAULT],
+    ['Minibús', 0, 'ARS', 0, 'propio', EQUIPOS_DESDE_DEFAULT],
+    ['Camión regador', 0, 'ARS', 0, 'propio', EQUIPOS_DESDE_DEFAULT],
   ]);
 
   let prod = ss.getSheetByName(TABS.PROD) || ss.insertSheet(TABS.PROD);
@@ -171,9 +178,39 @@ function leerConfigCompleta_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sc = ss.getSheetByName(TABS.CONFIG);
   const config = sc.getLastRow() > 1 ? sc.getRange(2, 1, sc.getLastRow() - 1, 3).getValues().filter(r => r[0]).map(r => ({ clave: String(r[0]), valor: r[1] instanceof Date ? Utilities.formatDate(r[1], 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : r[1], desc: String(r[2] || '') })) : [];
-  const se = ss.getSheetByName(TABS.EQUIPOS);
-  const equipos = se.getLastRow() > 1 ? se.getRange(2, 1, se.getLastRow() - 1, 5).getValues().filter(r => r[0]).map(r => ({ equipo: String(r[0]), precio: Number(r[1]) || 0, moneda: r[2] === 'USD' ? 'USD' : 'ARS', conIva: Number(r[3]) === 1 ? 1 : 0, obs: String(r[4] || '') })) : [];
-  return { config, equipos };
+  return { config, equipos: leerEquipos_() };
+}
+
+// Fecha de celda (Date o texto) → 'yyyy-MM-dd'; '' si está vacía o no se entiende
+function fechaStr_(v) {
+  if (!v && v !== 0) return '';
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  return '';
+}
+const sinTildes_ = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+// Lista de EQUIPOS con su fecha DESDE (col F). Si la planilla es anterior a esa columna, la crea y
+// carga EQUIPOS_DESDE_DEFAULT en todos los equipos salvo los de EQUIPOS_DESDE_EXCEPTO (una sola vez).
+function leerEquipos_() {
+  const se = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.EQUIPOS);
+  if (!se) return [];
+  if (String(se.getRange(1, 6).getValue()).trim().toUpperCase() !== 'DESDE') {
+    se.getRange(1, 6, se.getMaxRows(), 1).setNumberFormat('@');
+    se.getRange(1, 6).setValue('DESDE').setFontWeight('bold');
+    const n = se.getLastRow() - 1;
+    if (n > 0) {
+      const nombres = se.getRange(2, 1, n, 1).getValues();
+      se.getRange(2, 6, n, 1).setValues(nombres.map(r => [!r[0] || EQUIPOS_DESDE_EXCEPTO.some(x => sinTildes_(r[0]).includes(x)) ? '' : EQUIPOS_DESDE_DEFAULT]));
+    }
+  }
+  if (se.getLastRow() < 2) return [];
+  return se.getRange(2, 1, se.getLastRow() - 1, 6).getValues().filter(r => r[0]).map(r => ({
+    equipo: String(r[0]), precio: Number(r[1]) || 0, moneda: r[2] === 'USD' ? 'USD' : 'ARS', conIva: Number(r[3]) === 1 ? 1 : 0, obs: String(r[4] || ''), desde: fechaStr_(r[5]),
+  }));
 }
 
 const CLAVES_NUM = ['TC', 'IVA', 'COMB_CON_IVA', 'DIAS_MES', 'PRECIO_T', 'SOBREFRESADO', 'CAP_CAMION', 'FLETE_ARS', 'COMB_ESTIMADO_ARS', 'MO_USD', 'SENAL_USD', 'PUNTAS_JUEGO_ARS', 'PUNTAS_VIDA_T'];
@@ -200,24 +237,28 @@ function guardarConfig(p, user) {
     const lista = p.equipos.filter(e => e && String(e.equipo || '').trim()).map(e => {
       const precio = Number(String(e.precio).replace(',', '.')) || 0;
       if (precio < 0) throw new Error('Precio inválido en ' + e.equipo);
-      return [String(e.equipo).trim().slice(0, 80), precio, e.moneda === 'USD' ? 'USD' : 'ARS', Number(e.conIva) === 1 ? 1 : 0, String(e.obs || '').slice(0, 120)];
+      const desdeRaw = String(e.desde || '').trim(), desde = fechaStr_(desdeRaw);
+      if (desdeRaw && !desde) throw new Error('Fecha "desde" inválida en ' + e.equipo + ' (usar AAAA-MM-DD)');
+      return [String(e.equipo).trim().slice(0, 80), precio, e.moneda === 'USD' ? 'USD' : 'ARS', Number(e.conIva) === 1 ? 1 : 0, String(e.obs || '').slice(0, 120), desde];
     });
-    if (se.getLastRow() > 1) se.getRange(2, 1, se.getLastRow() - 1, 5).clearContent();
-    if (lista.length) se.getRange(2, 1, lista.length, 5).setValues(lista);
+    leerEquipos_();   // asegura la columna DESDE en planillas viejas
+    se.getRange(1, 6, se.getMaxRows(), 1).setNumberFormat('@');
+    if (se.getLastRow() > 1) se.getRange(2, 1, se.getLastRow() - 1, 6).clearContent();
+    if (lista.length) se.getRange(2, 1, lista.length, 6).setValues(lista);
   }
   return { ok: true };
 }
 
+// Costo de equipos a régimen (todos los equipos de la lista). El prorrateo real por día,
+// respetando la fecha DESDE de cada equipo, se hace en getDatos.
 function costoEquiposDia_(cfg) {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.EQUIPOS);
-  if (!sh || sh.getLastRow() < 2) return { dia: 0, detalle: [] };
-  const v = sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues();
+  const lista = leerEquipos_();
+  if (!lista.length) return { dia: 0, mes: 0, detalle: [] };
   let mes = 0; const detalle = [];
-  v.forEach(r => {
-    if (!r[0]) return;
-    let usd = r[2] === 'USD' ? Number(r[1]) : Number(r[1]) / Number(cfg.TC);
-    if (Number(r[3]) === 1) usd = usd / (1 + Number(cfg.IVA));
-    mes += usd; detalle.push({ equipo: r[0], usdMes: usd });
+  lista.forEach(e => {
+    let usd = e.moneda === 'USD' ? e.precio : e.precio / Number(cfg.TC);
+    if (e.conIva === 1) usd = usd / (1 + Number(cfg.IVA));
+    mes += usd; detalle.push({ equipo: e.equipo, usdMes: usd, desde: e.desde || '' });
   });
   return { dia: mes / Number(cfg.DIAS_MES), mes, detalle };
 }
@@ -344,17 +385,27 @@ function getDatos(user) {
     if (f > fin) break;
     if (!esFinde(f) || porFecha[f]) calendario.push(f);   // hábiles + fines de semana con carga
   }
-  // Alquileres mensuales: mes cerrado → prorrateo por los días de obra de ese mes; mes en curso → DIAS_MES
+  // Alquileres mensuales: mes cerrado → prorrateo por los días de obra de ese mes; mes en curso → DIAS_MES.
+  // Cada equipo cuenta solo desde su fecha DESDE (vacía = desde el inicio de obra); antes, sin costo.
   const meses = {};
   calendario.forEach(f => { const m = f.slice(0, 7); if (!meses[m]) meses[m] = { mes: m, diasObra: 0, conCarga: 0, cerrado: hoy.slice(0, 7) > m, equiposDia: eq.dia }; meses[m].diasObra++; if (porFecha[f] && porFecha[f].t > 0) meses[m].conCarga++; });
-  Object.values(meses).forEach(m => { if (m.cerrado && m.diasObra > 0) m.equiposDia = eq.mes / m.diasObra; });
+  const activo = (e, f) => !e.desde || f >= e.desde;
+  // días de obra de cada equipo en cada mes (para prorratear meses cerrados)
+  const diasEq = {};   // mes -> [días activos por equipo]
+  calendario.forEach(f => { const m = f.slice(0, 7); if (!diasEq[m]) diasEq[m] = eq.detalle.map(() => 0); eq.detalle.forEach((e, i) => { if (activo(e, f)) diasEq[m][i]++; }); });
+  const equiposDiaEn = f => {
+    const m = f.slice(0, 7), cerrado = meses[m].cerrado;
+    return eq.detalle.reduce((s, e, i) => !activo(e, f) ? s : s + (cerrado && diasEq[m][i] > 0 ? e.usdMes / diasEq[m][i] : e.usdMes / Number(cfg.DIAS_MES)), 0);
+  };
+  const equiposActivosEn = f => eq.detalle.filter(e => activo(e, f) && e.usdMes > 0).length;
+  Object.values(meses).forEach(m => { const fs = calendario.filter(f => f.slice(0, 7) === m.mes); if (fs.length) m.equiposDia = fs.reduce((s, f) => s + equiposDiaEn(f), 0) / fs.length; });
 
   let acum = { t: 0, costo: 0, fact: 0, dias: 0, diasConCarga: 0, comb: 0, flete: 0, fijos: 0, puntas: 0 };
   const serie = calendario.map(f => {
     const d = porFecha[f] || { fecha: f, t: 0, viajes: null, obs: '', por: '', jornada: 0, combArs: null, sinCarga: true };
     const jornada = d.sinCarga ? 0 : d.jornada;
     const mesInfo = meses[f.slice(0, 7)];
-    const equiposDiaUsado = mesInfo.cerrado ? mesInfo.equiposDia : eq.dia;
+    const equiposDiaUsado = equiposDiaEn(f);
     const fijos = equiposDiaUsado + Number(cfg.MO_USD) + Number(cfg.SENAL_USD);   // siempre
     const c = (!combDesde || f >= combDesde) ? comb.porDia[f] : null;
     const manual = d.combArs !== null && d.combArs !== undefined && !isNaN(d.combArs);
@@ -369,7 +420,7 @@ function getDatos(user) {
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
       fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), obs: d.obs, por: d.por,
-      fijos, equiposDia: equiposDiaUsado, diasMes: mesInfo.cerrado ? mesInfo.diasObra : Number(cfg.DIAS_MES), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
+      fijos, equiposDia: equiposDiaUsado, equiposN: equiposActivosEn(f), diasMes: mesInfo.cerrado ? mesInfo.diasObra : Number(cfg.DIAS_MES), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,
     };
@@ -379,6 +430,7 @@ function getDatos(user) {
     cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE },
     base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_USD), senalDia: Number(cfg.SENAL_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
     serie, acum, recambios, meses: Object.values(meses), inicio,
+    equiposTotal: eq.detalle.filter(e => e.usdMes > 0).length,
     combustible: comb.diag,
     user: user || '',
     hoy: Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'),
