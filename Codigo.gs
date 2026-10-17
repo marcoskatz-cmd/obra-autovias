@@ -191,7 +191,6 @@ function fechaStr_(v) {
   if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
   return '';
 }
-const sinTildes_ = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 // Lista de EQUIPOS con su fecha DESDE (col F). Si la planilla es anterior a esa columna, la crea y
 // carga EQUIPOS_DESDE_DEFAULT en todos los equipos salvo los de EQUIPOS_DESDE_EXCEPTO (una sola vez).
