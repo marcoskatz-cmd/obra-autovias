@@ -467,14 +467,17 @@ function getDatos(user) {
   for (let d = new Date(inicio + 'T12:00:00'); ; d.setDate(d.getDate() + 1)) {
     const f = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
     if (f > fin) break;
-    if (!esFinde(f) || porFecha[f]) calendario.push(f);   // hábiles + fines de semana con carga
+    calendario.push(f);   // todos los días: los findes sin carga se muestran a cero, sin costo fijo
   }
+  // Día de obra = hábil, o fin de semana en que se tiró. Un finde sin carga es día libre: no corre ningún fijo.
+  const esDiaObra = f => !esFinde(f) || !!porFecha[f];
+  const diasObra = calendario.filter(esDiaObra);
   // Gasoil cargado un día fuera del calendario (fin de semana sin producción) se imputa al día de obra siguiente
   // (es la carga para arrancar el lunes); si todavía no hay día siguiente, al último día de obra.
-  const calSet = {}; calendario.forEach(f => calSet[f] = true);
+  const calSet = {}; diasObra.forEach(f => calSet[f] = true);
   Object.keys(comb.porDia).sort().forEach(f => {
-    if (calSet[f] || (combDesde && f < combDesde) || !calendario.length) return;
-    const dest = calendario.filter(c => c > f)[0] || calendario[calendario.length - 1];
+    if (calSet[f] || (combDesde && f < combDesde) || !diasObra.length) return;
+    const dest = diasObra.filter(c => c > f)[0] || diasObra[diasObra.length - 1];
     const d = comb.porDia[dest] || (comb.porDia[dest] = { litros: 0, ars: 0, registros: [] });
     const s = comb.porDia[f];
     d.litros += s.litros; d.ars += s.ars; d.registros = d.registros.concat(s.registros);
@@ -483,25 +486,26 @@ function getDatos(user) {
   // Alquileres mensuales: mes cerrado → prorrateo por los días de obra de ese mes; mes en curso → DIAS_MES.
   // Cada equipo cuenta solo desde su fecha DESDE (vacía = desde el inicio de obra); antes, sin costo.
   const meses = {};
-  calendario.forEach(f => { const m = f.slice(0, 7); if (!meses[m]) meses[m] = { mes: m, diasObra: 0, conCarga: 0, cerrado: hoy.slice(0, 7) > m, equiposDia: eq.dia }; meses[m].diasObra++; if (porFecha[f] && porFecha[f].t > 0) meses[m].conCarga++; });
+  calendario.forEach(f => { const m = f.slice(0, 7); if (!meses[m]) meses[m] = { mes: m, diasObra: 0, conCarga: 0, cerrado: hoy.slice(0, 7) > m, equiposDia: eq.dia }; if (esDiaObra(f)) meses[m].diasObra++; if (porFecha[f] && porFecha[f].t > 0) meses[m].conCarga++; });
   const activo = (e, f) => !e.desde || f >= e.desde;
   // días de obra de cada equipo en cada mes (para prorratear meses cerrados)
   const diasEq = {};   // mes -> [días activos por equipo]
-  calendario.forEach(f => { const m = f.slice(0, 7); if (!diasEq[m]) diasEq[m] = eq.detalle.map(() => 0); eq.detalle.forEach((e, i) => { if (activo(e, f)) diasEq[m][i]++; }); });
+  diasObra.forEach(f => { const m = f.slice(0, 7); if (!diasEq[m]) diasEq[m] = eq.detalle.map(() => 0); eq.detalle.forEach((e, i) => { if (activo(e, f)) diasEq[m][i]++; }); });
   const equiposDiaEn = f => {
     const m = f.slice(0, 7), cerrado = meses[m].cerrado;
     return eq.detalle.reduce((s, e, i) => !activo(e, f) ? s : s + (cerrado && diasEq[m][i] > 0 ? e.usdMes / diasEq[m][i] : e.usdMes / Number(cfg.DIAS_MES)), 0);
   };
   const equiposActivosEn = f => eq.detalle.filter(e => activo(e, f) && e.usdMes > 0).length;
-  Object.values(meses).forEach(m => { const fs = calendario.filter(f => f.slice(0, 7) === m.mes); if (fs.length) m.equiposDia = fs.reduce((s, f) => s + equiposDiaEn(f), 0) / fs.length; });
+  Object.values(meses).forEach(m => { const fs = diasObra.filter(f => f.slice(0, 7) === m.mes); if (fs.length) m.equiposDia = fs.reduce((s, f) => s + equiposDiaEn(f), 0) / fs.length; });
 
   let acum = { t: 0, costo: 0, fact: 0, dias: 0, diasConCarga: 0, comb: 0, flete: 0, fijos: 0, puntas: 0 };
   const serie = calendario.map(f => {
     const d = porFecha[f] || { fecha: f, t: 0, viajes: null, obs: '', por: '', jornada: 0, combArs: null, sinCarga: true };
     const jornada = d.sinCarga ? 0 : d.jornada;
     const mesInfo = meses[f.slice(0, 7)];
-    const equiposDiaUsado = equiposDiaEn(f);
-    const fijos = equiposDiaUsado + Number(cfg.MO_USD) + Number(cfg.SENAL_USD);   // siempre
+    const libre = !esDiaObra(f);   // finde sin carga: se muestra pero no cuesta
+    const equiposDiaUsado = libre ? 0 : equiposDiaEn(f);
+    const fijos = libre ? 0 : equiposDiaUsado + Number(cfg.MO_USD) + Number(cfg.SENAL_USD);   // todos los días de obra
     // Combustible: manual del día > real de las planillas > antes de COMB_DESDE estimado; desde COMB_DESDE,
     // si no hay carga registrada es porque no hubo consumo (0).
     const conReal = !combDesde || f >= combDesde;
@@ -514,10 +518,10 @@ function getDatos(user) {
     const puntas = d.t * puntasPorT;
     const costo = fijos + combUSD + flete + puntas;
     const fact = d.t * Number(cfg.PRECIO_T);
-    acum.t += d.t; acum.costo += costo; acum.fact += fact; acum.dias += 1; if (d.t > 0) acum.diasConCarga += 1;
+    acum.t += d.t; acum.costo += costo; acum.fact += fact; if (!libre) acum.dias += 1; if (d.t > 0) acum.diasConCarga += 1;
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
-      fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), obs: d.obs, por: d.por,
+      fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), libre, obs: d.obs, por: d.por,
       fijos, equiposDia: equiposDiaUsado, equiposN: equiposActivosEn(f), diasMes: mesInfo.cerrado ? mesInfo.diasObra : Number(cfg.DIAS_MES), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,

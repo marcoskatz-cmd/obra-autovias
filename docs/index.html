@@ -246,11 +246,11 @@ function render() {
   window.CAL = CAL;
   const lbl = CAL.map(fDia);
   const serieCal = fn => CAL.map(f => porFecha[f] ? fn(porFecha[f]) : null);
-  const colorPunto = base => CAL.map(f => porFecha[f].t > 0 ? base : (porFecha[f].jornada === 0 && !porFecha[f].sinCarga ? '#b9770e' : '#c0392b'));
+  const colorPunto = base => CAL.map(f => porFecha[f].t > 0 ? base : porFecha[f].libre ? '#9ca3af' : (porFecha[f].jornada === 0 && !porFecha[f].sinCarga ? '#b9770e' : '#c0392b'));
   let acumPrev = null, ultCostoT = null;
   const acumCal = CAL.map(f => { if (porFecha[f]) acumPrev = porFecha[f].acumUtil; return acumPrev; });
   const promCal = CAL.map(f => { if (porFecha[f]) ultCostoT = porFecha[f].acumCostoT; return ultCostoT; });
-  const sinCarga = s.filter(x => x.sinCarga && x.fecha < D.hoy).length;
+  const sinCarga = s.filter(x => x.sinCarga && !x.libre && x.fecha < D.hoy).length;
   document.getElementById('who').textContent = D.user === 'PIN' ? 'Bacheo con fresado' : D.user;
   document.getElementById('upd').textContent = 'act. ' + new Date().toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
   document.getElementById('fFecha').value = D.hoy; document.getElementById('pFecha').value = D.hoy;
@@ -316,7 +316,7 @@ function render() {
 
   // tablas
   document.getElementById('tDias').innerHTML = '<tr><th>Fecha</th><th class="n">t</th><th class="n">Viajes</th><th class="n">Comb.</th><th class="n">Costo</th><th class="n">Costo/t</th><th class="n">Prom. obra</th><th class="n">Utilidad</th><th class="n">Acum.</th><th>Obs</th><th></th></tr>' +
-    [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : x.combFuente === 'sin consumo' ? '<span class="tag">sin consumo</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button onclick="editar(\'' + x.fecha + '\')" style="border:0;background:none;color:var(--azul);font-weight:600">editar</button></td></tr>').join('');
+    [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.libre ? '<span class="tag">finde</span>' : x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : x.combFuente === 'sin consumo' ? '<span class="tag">sin consumo</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button onclick="editar(\'' + x.fecha + '\')" style="border:0;background:none;color:var(--azul);font-weight:600">editar</button></td></tr>').join('');
   document.getElementById('tPuntas').innerHTML = '<tr><th>Fecha</th><th class="n">Juegos</th><th>Obs</th></tr>' + (D.recambios.length ? D.recambios.map(r => '<tr><td>' + fDiaL(r.fecha) + '</td><td class="n">' + r.juegos + '</td><td>' + (r.obs||'') + '</td></tr>').join('') : '<tr><td colspan="3" class="small">Sin recambios registrados.</td></tr>');
 
   // charts
@@ -482,6 +482,7 @@ const lineaGuia = { id:'lineaGuia', afterDraw(c) {
 function detalleDia(i) {
   const f = window.CAL ? CAL[i] : null, x = f ? D.serie.find(z => z.fecha === f) : D.serie[i];
   if (!x) return [];
+  if (x.libre) return ['Fin de semana sin carga: no corre ningún costo'];
   if (x.sinCarga) return ['Sin carga: no se tiró mezcla este día', 'Fijos igual: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + eqN(x) + ' + personal + señalización)', 'Acumulado: ' + fmtUSD2(x.acumCostoT) + '/t · utilidad ' + fmtUSD(x.acumUtil)];
   return [
     'Toneladas: ' + fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)'),
