@@ -278,7 +278,8 @@ function leerEntregas_(id, cfg, out, filtro, fuente) {
   const data = sh.getDataRange().getValues();
   const head = data[0].map(h => String(h).trim().toUpperCase());
   const col = { f: head.indexOf('FECHA'), l: head.indexOf('CANTIDAD (L)'), t: head.indexOf('PRECIO TOTAL'), o: head.indexOf('OBRA GENERAL'),
-    lug: head.findIndex(h => h.startsWith('LUGAR ENTREGA')), eq: head.findIndex(h => h.startsWith('EQUIPO')), cod: head.findIndex(h => h.startsWith('CODIGO') || h.startsWith('CÓDIGO')), op: head.indexOf('OPERARIO') };
+    lug: head.findIndex(h => h.startsWith('LUGAR ENTREGA')), eq: head.findIndex(h => h.startsWith('EQUIPO')), cod: head.findIndex(h => h.startsWith('CODIGO') || h.startsWith('CÓDIGO')), op: head.indexOf('OPERARIO'),
+    pat: head.findIndex(h => h.includes('PATENTE')), hor: head.findIndex(h => h.startsWith('HORÓMETRO') || h.startsWith('HOROMETRO')) };
   const faltan = [['FECHA', col.f], ['CANTIDAD (L)', col.l], ['PRECIO TOTAL', col.t], ['OBRA GENERAL', col.o]].filter(x => x[1] < 0).map(x => x[0]);
   if (faltan.length) throw new Error('Faltan columnas en la planilla de combustible: ' + faltan.join(', '));
   const excluir = String(cfg.COMB_EXCLUIR || '').split(',').map(sinTildes_).filter(Boolean);
@@ -294,7 +295,10 @@ function leerEntregas_(id, cfg, out, filtro, fuente) {
     const litros = Number(r[col.l]) || 0, ars = aNumero_(r[col.t]);
     if (!out[k]) out[k] = { litros: 0, ars: 0, registros: [] };
     out[k].litros += litros; out[k].ars += ars;
-    out[k].registros.push({ equipo: cel(r, col.eq) || cel(r, col.cod), operario: cel(r, col.op), litros, ars, fuente });
+    // Lectura de horómetro (equipos, h) u odómetro (camionetas, km) al momento de la carga; vacía si no funciona
+    const horRaw = col.hor >= 0 ? r[col.hor] : '';
+    const hor = horRaw === '' || horRaw === null ? null : (typeof horRaw === 'number' ? horRaw : aNumero_(horRaw) || null);
+    out[k].registros.push({ fecha: k, equipo: cel(r, col.eq) || cel(r, col.cod), codigo: cel(r, col.cod), patente: cel(r, col.pat), operario: cel(r, col.op), litros, ars, hor, fuente });
     n++;
   }
   return { n, excluidos };
@@ -324,6 +328,44 @@ function combustiblePorDia_(cfg) {
 }
 
 function sinTildes_(v) { return String(v || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+
+// Resumen de combustible por equipo/camioneta desde `desde` (yyyy-MM-dd, vac\u00edo = todo): cargas, litros, $ y consumo.
+// Consumo por el m\u00e9todo de lecturas: entre la primera y la \u00faltima carga con hor\u00f3metro/od\u00f3metro v\u00e1lido se suman
+// los litros cargados DESPU\u00c9S de la primera lectura y se dividen por las horas (l/h) o se invierte para km/l.
+function consumosCombustible_(porDia, desde) {
+  const eqs = {};
+  Object.keys(porDia).sort().forEach(f => {
+    if (desde && f < desde) return;
+    porDia[f].registros.forEach(r => {
+      const k = r.fuente + '|' + (r.codigo || r.patente || r.equipo || 'sin equipo');
+      if (!eqs[k]) eqs[k] = { equipo: r.equipo || 'Sin equipo', codigo: r.codigo, patente: r.patente, fuente: r.fuente, operarios: {}, cargas: [], litros: 0, ars: 0 };
+      const e = eqs[k];
+      e.cargas.push({ fecha: f, litros: r.litros, ars: r.ars, hor: r.hor, operario: r.operario });
+      e.litros += r.litros; e.ars += r.ars;
+      if (r.operario) e.operarios[r.operario] = (e.operarios[r.operario] || 0) + 1;
+    });
+  });
+  return Object.values(eqs).map(e => {
+    const lect = e.cargas.filter(c => c.hor !== null && c.hor > 0);
+    let consumo = null, unidad = e.fuente === 'camioneta' ? 'km/l' : 'l/h', delta = null, litrosTramo = null, aviso = '';
+    if (lect.length >= 2) {
+      const a = lect[0], b = lect[lect.length - 1];
+      delta = b.hor - a.hor;
+      // litros cargados despu\u00e9s de la primera lectura hasta la \u00faltima (inclusive): lo que se consumi\u00f3 en ese tramo
+      const ia = e.cargas.indexOf(a), ib = e.cargas.indexOf(b);
+      litrosTramo = e.cargas.slice(ia + 1, ib + 1).reduce((s, c) => s + c.litros, 0);
+      if (delta > 0 && litrosTramo > 0) {
+        consumo = e.fuente === 'camioneta' ? delta / litrosTramo : litrosTramo / delta;
+        const raro = e.fuente === 'camioneta' ? (consumo < 3 || consumo > 25) : (consumo < 1 || consumo > 80);
+        if (raro) aviso = 'Valor fuera de lo normal: revisar las lecturas en la planilla';
+      } else aviso = delta <= 0 ? 'Las lecturas no avanzan (' + a.hor + ' \u2192 ' + b.hor + '): revisar la planilla' : 'Sin cargas despu\u00e9s de la primera lectura';
+    } else aviso = lect.length === 1 ? 'Una sola lectura: hace falta otra carga con hor\u00f3metro/od\u00f3metro' : 'Sin lecturas de hor\u00f3metro/od\u00f3metro en las cargas';
+    const ops = Object.keys(e.operarios).sort((x, y) => e.operarios[y] - e.operarios[x]);
+    return { equipo: e.equipo, codigo: e.codigo, patente: e.patente, fuente: e.fuente, operario: ops[0] || '', n: e.cargas.length, litros: e.litros, ars: e.ars,
+      lecturas: lect.length, horIni: lect.length ? lect[0].hor : null, horFin: lect.length ? lect[lect.length - 1].hor : null, delta, litrosTramo, consumo, unidad, aviso,
+      desde: e.cargas[0].fecha, hasta: e.cargas[e.cargas.length - 1].fecha, cargas: e.cargas };
+  }).sort((x, y) => x.fuente !== y.fuente ? (x.fuente === 'obra' ? -1 : 1) : y.litros - x.litros);
+}
 
 // Diagnóstico: valores distintos de OBRA GENERAL / LUGAR ENTREGA en la planilla de Leandro (últimas filas)
 function obrasCombustible_() {
@@ -458,6 +500,7 @@ function getDatos(user) {
     serie, acum, recambios, meses: Object.values(meses), inicio,
     equiposTotal: eq.detalle.filter(e => e.usdMes > 0).length,
     combustible: comb.diag,
+    consumos: consumosCombustible_(comb.porDia, combDesde),
     user: user || '',
     hoy: Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'),
   };
