@@ -5,11 +5,11 @@ Panel de costo y utilidad diaria. Frontend en GitHub Pages + backend Apps Script
 ## Qué hace
 
 - **Carga diaria** de toneladas colocadas (y viajes de mezcla si difieren del auto-cálculo).
-- **Combustible real** leído de `ENTREGAS DE COMBUSTIBLE - LEANDRO CASARES`, filtrando por la obra. Días sin carga usan el estimado y quedan marcados.
+- **Combustible real** de dos planillas: `ENTREGAS DE COMBUSTIBLE - LEANDRO CASARES` filtrada por la obra (equipos) y `ENTREGAS DE COMBUSTIBLE - TIBURCIO SANZ` filtrada por operario/código (camionetas, `COMB_CAMIONETAS`). Desde `COMB_DESDE` (15-oct-2026) un día sin carga registrada es un día sin consumo; el estimado solo se usa para los días anteriores.
 - **Recambios de puntas** para calibrar la vida útil real.
 - **Panel**: costo/t del día y promedio de obra, utilidad del día / promedio / acumulada, punto de equilibrio, gráficos de evolución, estructura del costo.
 - **Costos editables desde la app** (pestaña Costos): parámetros de CONFIG y lista de EQUIPOS. La planilla es solo almacenamiento; nadie necesita abrirla.
-- **Combustible por día con prioridad**: monto manual cargado en el día → planilla de Leandro → estimado.
+- **Combustible por día con prioridad**: monto manual cargado en el día → planillas (Leandro + Tiburcio) → antes de `COMB_DESDE` estimado, después 0.
 
 ## Arquitectura
 
@@ -39,7 +39,9 @@ fijos      = (Σ alquileres USD/mes ÷ DIAS_MES) + MO_USD + SENAL_USD
              cada equipo suma solo desde su fecha DESDE (col. F de EQUIPOS; vacía = OBRA_INICIO).
              Autovías: todo menos la fresadora cuenta desde el 2026-10-13; los días previos van sin costo.
              (La columna DESDE se crea sola la primera vez que corre el backend nuevo sobre una planilla vieja.)
-combustible= manual del día | real de Leandro | COMB_ESTIMADO_ARS   (÷ (1+IVA si COMB_CON_IVA) ÷ TC)
+combustible= manual del día | real (Leandro por obra + Tiburcio por COMB_CAMIONETAS)
+             | si fecha < COMB_DESDE: COMB_ESTIMADO_ARS, si no: 0 (sin registro = sin consumo)
+             (÷ (1+IVA si COMB_CON_IVA) ÷ TC)
 flete      = viajes × FLETE_ARS ÷ TC        viajes = ceil(t ÷ CAP_CAMION) salvo carga manual
 puntas     = t × (PUNTAS_JUEGO_ARS ÷ 1,21 ÷ TC ÷ vida) × SOBREFRESADO
              vida = PUNTAS_VIDA_T hasta tener ≥2 recambios; después t fresadas reales entre recambios

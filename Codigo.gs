@@ -7,7 +7,9 @@
  */
 
 // ---------- IDs ----------
-const ID_COMBUSTIBLE = '19eyY8MImPM_-Gyzj8QcqA_yR5KDrkuu-1faJUU48N1A'; // Leandro Casares (Shared Drive)
+const ID_COMBUSTIBLE = '19eyY8MImPM_-Gyzj8QcqA_yR5KDrkuu-1faJUU48N1A'; // Leandro Casares (Shared Drive): equipos de obra
+const ID_COMBUSTIBLE_CAMIONETAS = '1DD8BVoF6jX-CcakbbVO6fNJKYF82qBIK1YwyVLQcDJ8'; // Tiburcio Sanz: camionetas, se filtra por operario/código (CONFIG > COMB_CAMIONETAS)
+const COMB_CAMIONETAS_DEFAULT = 'Hugo Castaño';
 const HOJA_ENTREGAS = 'ENTREGAS';
 
 const TABS = { CONFIG: 'CONFIG', PROD: 'PRODUCCION', PUNTAS: 'PUNTAS', EQUIPOS: 'EQUIPOS' };
@@ -113,6 +115,7 @@ function setup() {
     ['COMB_CON_IVA', 1, '1 si el precio de la planilla de combustible incluye IVA'],
     ['COMB_DESDE', '2026-10-15', 'Desde qué fecha se toma el combustible real de la planilla de Leandro (antes: manual o estimado)'],
     ['COMB_EXCLUIR', 'camion batea', 'Equipos a excluir del combustible (separados por coma; contiene, sin tildes). El camión batea va dentro del flete'],
+    ['COMB_CAMIONETAS', COMB_CAMIONETAS_DEFAULT, 'Camionetas de la obra en la planilla de Tiburcio Sanz: operarios o códigos (ej. "Hugo Castaño, CMT-22"), separados por coma. Contiene, sin tildes'],
     ['DIAS_MES', 22, 'Días laborables por mes (divide los alquileres en el mes en curso)'],
     ['OBRA_INICIO', '2026-10-07', 'Primer día de obra: desde acá corren los fijos todos los días hábiles'],
     ['PRECIO_T', 79.5, 'Precio pactado USD/t colocada sin IVA'],
@@ -170,6 +173,11 @@ function leerConfig_() {
   const v = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 2).getValues();
   const o = {};
   v.forEach(r => { if (r[0]) o[r[0]] = r[1]; });
+  // claves nuevas en planillas viejas: se agregan solas con su valor por defecto
+  if (!('COMB_CAMIONETAS' in o)) {
+    sh.appendRow(['COMB_CAMIONETAS', COMB_CAMIONETAS_DEFAULT, 'Camionetas de la obra en la planilla de Tiburcio Sanz: operarios o códigos (ej. "Hugo Castaño, CMT-22"), separados por coma. Contiene, sin tildes']);
+    o.COMB_CAMIONETAS = COMB_CAMIONETAS_DEFAULT;
+  }
   return o;
 }
 
@@ -262,40 +270,56 @@ function costoEquiposDia_(cfg) {
   return { dia: mes / Number(cfg.DIAS_MES), mes, detalle };
 }
 
-// ---------- Combustible desde planilla de Leandro ----------
+// ---------- Combustible real: equipos (planilla de Leandro) + camionetas (planilla de Tiburcio) ----------
+// Lee una planilla de entregas y suma en `out` las filas que pasan `filtro(fila)`. Devuelve cuántas filas sumó.
+function leerEntregas_(id, cfg, out, filtro, fuente) {
+  const sh = SpreadsheetApp.openById(id).getSheetByName(HOJA_ENTREGAS);
+  if (!sh) throw new Error('No existe la hoja ' + HOJA_ENTREGAS);
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(h => String(h).trim().toUpperCase());
+  const col = { f: head.indexOf('FECHA'), l: head.indexOf('CANTIDAD (L)'), t: head.indexOf('PRECIO TOTAL'), o: head.indexOf('OBRA GENERAL'),
+    lug: head.findIndex(h => h.startsWith('LUGAR ENTREGA')), eq: head.findIndex(h => h.startsWith('EQUIPO')), cod: head.findIndex(h => h.startsWith('CODIGO') || h.startsWith('CÓDIGO')), op: head.indexOf('OPERARIO') };
+  const faltan = [['FECHA', col.f], ['CANTIDAD (L)', col.l], ['PRECIO TOTAL', col.t], ['OBRA GENERAL', col.o]].filter(x => x[1] < 0).map(x => x[0]);
+  if (faltan.length) throw new Error('Faltan columnas en la planilla de combustible: ' + faltan.join(', '));
+  const excluir = String(cfg.COMB_EXCLUIR || '').split(',').map(sinTildes_).filter(Boolean);
+  const cel = (r, i) => i >= 0 ? String(r[i] || '') : '';
+  let n = 0, excluidos = 0;
+  for (let i = 1; i < data.length; i++) {
+    const r = data[i];
+    const fila = { obra: sinTildes_(cel(r, col.o)), lugar: sinTildes_(cel(r, col.lug)), equipo: sinTildes_(cel(r, col.eq)), codigo: sinTildes_(cel(r, col.cod)), operario: sinTildes_(cel(r, col.op)) };
+    if (!filtro(fila)) continue;
+    if (excluir.length) { const todo = sinTildes_(r.map(v => String(v || '')).join(' | ')); if (excluir.some(x => todo.includes(x))) { excluidos++; continue; } }
+    const d = aFecha_(r[col.f]); if (!d) continue;
+    const k = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
+    const litros = Number(r[col.l]) || 0, ars = aNumero_(r[col.t]);
+    if (!out[k]) out[k] = { litros: 0, ars: 0, registros: [] };
+    out[k].litros += litros; out[k].ars += ars;
+    out[k].registros.push({ equipo: cel(r, col.eq) || cel(r, col.cod), operario: cel(r, col.op), litros, ars, fuente });
+    n++;
+  }
+  return { n, excluidos };
+}
+
 function combustiblePorDia_(cfg) {
   const out = {}; // 'yyyy-MM-dd' -> { litros, ars, registros }
   let diag = { ok: true, msg: '' };
+  const partes = [];
+  // 1) equipos de obra: planilla de Leandro, filtrada por el nombre de la obra
   try {
-    const ss = SpreadsheetApp.openById(ID_COMBUSTIBLE);
-    const sh = ss.getSheetByName(HOJA_ENTREGAS);
-    if (!sh) throw new Error('No existe la hoja ' + HOJA_ENTREGAS);
-    const data = sh.getDataRange().getValues();
-    const head = data[0].map(h => String(h).trim().toUpperCase());
-    const iF = head.indexOf('FECHA'), iL = head.indexOf('CANTIDAD (L)'), iT = head.indexOf('PRECIO TOTAL'),
-          iO = head.indexOf('OBRA GENERAL'), iLug = head.findIndex(h => h.startsWith('LUGAR ENTREGA')), iEq = head.findIndex(h => h.startsWith('EQUIPO'));
-    const faltan = [['FECHA', iF], ['CANTIDAD (L)', iL], ['PRECIO TOTAL', iT], ['OBRA GENERAL', iO]].filter(x => x[1] < 0).map(x => x[0]);
-    if (faltan.length) throw new Error('Faltan columnas en la planilla de combustible: ' + faltan.join(', '));
     const clave = sinTildes_(cfg.OBRA_COMBUSTIBLE);
-    const excluir = String(cfg.COMB_EXCLUIR || '').split(',').map(sinTildes_).filter(Boolean);
-    let excluidos = 0;
-    for (let i = 1; i < data.length; i++) {
-      const r = data[i];
-      const obra = sinTildes_(r[iO]), lugar = sinTildes_(iLug >= 0 ? r[iLug] : '');
-      if (!clave || (!obra.includes(clave) && !lugar.includes(clave))) continue;
-      if (excluir.length) { const fila = sinTildes_(r.map(v => String(v || '')).join(' | ')); if (excluir.some(x => fila.includes(x))) { excluidos++; continue; } }
-      const d = aFecha_(r[iF]); if (!d) continue;
-      const k = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
-      const litros = Number(r[iL]) || 0;
-      const ars = aNumero_(r[iT]);
-      if (!out[k]) out[k] = { litros: 0, ars: 0, registros: [] };
-      out[k].litros += litros; out[k].ars += ars;
-      out[k].registros.push({ equipo: String(iEq >= 0 ? r[iEq] : ''), litros, ars });
-    }
-    const total = Object.keys(out).length;
-    diag.msg = total ? (total + ' días con carga de combustible para "' + cfg.OBRA_COMBUSTIBLE + '"' + (excluidos ? ' (' + excluidos + ' registros excluidos: ' + cfg.COMB_EXCLUIR + ')' : '')) : ('Sin registros para "' + cfg.OBRA_COMBUSTIBLE + '" en la planilla de Leandro. Verificá CONFIG > OBRA_COMBUSTIBLE.');
-    if (!total) diag.ok = false;
-  } catch (e) { diag = { ok: false, msg: 'No se pudo leer combustible: ' + e.message }; }
+    const r = leerEntregas_(ID_COMBUSTIBLE, cfg, out, f => !!clave && (f.obra.includes(clave) || f.lugar.includes(clave)), 'obra');
+    if (r.n) partes.push(r.n + ' cargas de equipos (Leandro, "' + cfg.OBRA_COMBUSTIBLE + '")' + (r.excluidos ? ', ' + r.excluidos + ' excluidas: ' + cfg.COMB_EXCLUIR : ''));
+    else { diag.ok = false; partes.push('Sin registros para "' + cfg.OBRA_COMBUSTIBLE + '" en la planilla de Leandro. Verificá CONFIG > OBRA_COMBUSTIBLE'); }
+  } catch (e) { diag.ok = false; partes.push('No se pudo leer la planilla de Leandro: ' + e.message); }
+  // 2) camionetas: planilla de Tiburcio, filtrada por operario o código de la camioneta
+  const camionetas = String(cfg.COMB_CAMIONETAS || '').split(',').map(sinTildes_).filter(Boolean);
+  if (camionetas.length) {
+    try {
+      const r = leerEntregas_(ID_COMBUSTIBLE_CAMIONETAS, cfg, out, f => camionetas.some(c => f.operario.includes(c) || f.codigo.includes(c) || (c.length >= 5 && f.equipo.includes(c))), 'camioneta');
+      partes.push(r.n ? r.n + ' cargas de camionetas (Tiburcio: ' + cfg.COMB_CAMIONETAS + ')' : 'Sin cargas de camionetas para "' + cfg.COMB_CAMIONETAS + '" en la planilla de Tiburcio');
+    } catch (e) { partes.push('No se pudo leer la planilla de Tiburcio (camionetas): ' + e.message); }
+  }
+  diag.msg = partes.join(' · ');
   return { porDia: out, diag };
 }
 
@@ -406,10 +430,13 @@ function getDatos(user) {
     const mesInfo = meses[f.slice(0, 7)];
     const equiposDiaUsado = equiposDiaEn(f);
     const fijos = equiposDiaUsado + Number(cfg.MO_USD) + Number(cfg.SENAL_USD);   // siempre
-    const c = (!combDesde || f >= combDesde) ? comb.porDia[f] : null;
+    // Combustible: manual del día > real de las planillas > antes de COMB_DESDE estimado; desde COMB_DESDE,
+    // si no hay carga registrada es porque no hubo consumo (0).
+    const conReal = !combDesde || f >= combDesde;
+    const c = conReal ? comb.porDia[f] : null;
     const manual = d.combArs !== null && d.combArs !== undefined && !isNaN(d.combArs);
-    const combUSD = manual ? d.combArs / combDiv / TC : (c ? c.ars / combDiv / TC : combEstUSD * jornada);
-    const combFuente = manual ? 'manual' : (c ? 'real' : 'estimado');
+    const combUSD = manual ? d.combArs / combDiv / TC : (c ? c.ars / combDiv / TC : (conReal ? 0 : combEstUSD * jornada));
+    const combFuente = manual ? 'manual' : (c ? 'real' : (conReal ? 'sin consumo' : 'estimado'));
     const viajes = d.viajes !== null && d.viajes !== undefined ? d.viajes : Math.ceil(d.t / Number(cfg.CAP_CAMION));
     const flete = viajes * fleteUSD;
     const puntas = d.t * puntasPorT;
@@ -426,7 +453,7 @@ function getDatos(user) {
   });
 
   return {
-    cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE },
+    cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE, COMB_DESDE: combDesde, CAMIONETAS: String(cfg.COMB_CAMIONETAS || '') },
     base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_USD), senalDia: Number(cfg.SENAL_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
     serie, acum, recambios, meses: Object.values(meses), inicio,
     equiposTotal: eq.detalle.filter(e => e.usdMes > 0).length,
