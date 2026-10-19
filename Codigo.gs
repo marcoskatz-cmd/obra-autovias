@@ -48,6 +48,7 @@ function doPost(e) {
       case 'guardarPuntas': data = guardarPuntas(p, user); break;
       case 'borrarDia': data = borrarDia(p.fecha, user); break;
       case 'obras': data = obrasCombustible_(); break;
+      case 'diagCamionetas': data = diagCamionetas_(p.desde || '2026-10-10'); break;
       case 'config': data = leerConfigCompleta_(); break;
       case 'guardarConfig': data = guardarConfig(p, user); break;
       default: throw new Error('Acción desconocida: ' + body.accion);
@@ -385,6 +386,21 @@ function obrasCombustible_() {
     cnt[k].n++; if (d) { const f = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'); if (f > cnt[k].ultima) cnt[k].ultima = f; }
   }
   return { columnas: head, obras: Object.keys(cnt).map(k => ({ obra_lugar: k, n: cnt[k].n, ultima: cnt[k].ultima })).sort((a, b) => a.ultima < b.ultima ? 1 : -1) };
+}
+
+// Diagnóstico: filas de la planilla de Tiburcio desde una fecha (para ver cómo están cargadas las camionetas)
+function diagCamionetas_(desde) {
+  const sh = SpreadsheetApp.openById(ID_COMBUSTIBLE_CAMIONETAS).getSheetByName(HOJA_ENTREGAS);
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(h => String(h).trim());
+  const iF = head.findIndex(h => h.toUpperCase() === 'FECHA');
+  const filas = [];
+  for (let i = 1; i < data.length; i++) {
+    const d = aFecha_(data[i][iF]); if (!d) continue;
+    const f = Utilities.formatDate(d, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
+    if (f >= desde) filas.push(data[i].map(v => v instanceof Date ? Utilities.formatDate(v, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : v));
+  }
+  return { columnas: head, n: data.length - 1, filas };
 }
 
 function aFecha_(v) {
