@@ -126,7 +126,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
     <input type="number" id="fV" inputmode="numeric" min="0" max="20" step="1" placeholder="auto">
     <label>Combustible del día ($, con IVA) <span class="small">(opcional)</span></label>
     <input type="number" id="fComb" inputmode="numeric" min="0" step="1000" placeholder="vacío = planilla de Leandro o estimado">
-    <div class="hint">Si lo dejás vacío se usa la carga real de la planilla de Leandro y, si no hay, el estimado de Costos.</div>
+    <div class="hint">Si lo dejás vacío se usa la carga real de las planillas de combustible (equipos por Leandro, camionetas por Tiburcio). Si no hay carga registrada ese día, es que no hubo consumo. El estimado de Costos solo se aplica a los días anteriores a la fecha "Desde" de Costos.</div>
     <label>Observaciones <span class="small">(opcional)</span></label><textarea id="fObs" rows="2" placeholder="Frente, interrupciones, demoras de planta…"></textarea>
     <div class="preview" id="prev"></div>
     <button class="btn" id="bGuardar" onclick="guardar()">Guardar día</button>
@@ -170,7 +170,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
     <dl>
       <dt>Todos los días, al cierre</dt><dd>Pestaña <b>Cargar día</b>: fecha, toneladas colocadas y guardar. Si cargás dos veces la misma fecha, se reemplaza el dato anterior.</dd>
       <dt>Viajes de mezcla</dt><dd>Se calculan solos (1 viaje cada 30 t, redondeando para arriba). Si el fletero facturó otra cantidad, corregilo en el campo.</dd>
-      <dt>Combustible</dt><dd>Prioridad: el monto cargado a mano en el día (<span class="tag">manual</span>), si no la planilla de entregas de Leandro Casares filtrada por la obra (<span class="tag">litros</span>), y si no el estimado de Costos (<span class="tag est">est.</span>).</dd>
+      <dt>Combustible</dt><dd>Prioridad: el monto cargado a mano en el día (<span class="tag">manual</span>); si no, las planillas de entregas: la de Leandro Casares filtrada por la obra (equipos) más la de Tiburcio Sanz filtrada por operario o código (camionetas), ambas en <span class="tag">litros</span>. Desde la fecha en que Leandro empezó a registrar (Costos › Desde) un día sin carga es un día <span class="tag">sin consumo</span>. El estimado de Costos (<span class="tag est">est.</span>) solo se usa para los días anteriores a esa fecha.</dd>
       <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
       <dt>Costos fijos</dt><dd>Equipos alquilados, personal y señalización se pagan se tire o no: corren todos los días hábiles desde el inicio de la obra (fecha en Costos). Cada equipo puede tener su propia fecha "cuenta desde" (en Autovías todo menos la fresadora arrancó a contar el martes 13/10; los días previos fueron sin costo). Los días sin carga aparecen en los gráficos y en la tabla con su costo fijo. Combustible, flete y puntas solo se imputan cuando hay producción.</dd>
       <dt>Alquileres mensuales</dt><dd>Mientras el mes está en curso se prorratean por los días laborables de Costos. Cuando el mes termina, se recalculan dividiendo por los días hábiles de obra que tuvo ese mes.</dd>
@@ -256,8 +256,8 @@ function render() {
   // avisos
   let av = '';
   if (!D.combustible.ok) av += '<div class="aviso warn">⚠ ' + D.combustible.msg + '</div>';
-  const sinComb = s.filter(x => !x.combReal && x.jornada).length;
-  if (D.combustible.ok && sinComb) av += '<div class="aviso warn">' + sinComb + ' día(s) sin carga real de combustible: se usa el estimado.</div>';
+  const sinComb = s.filter(x => x.combFuente === 'estimado' && x.jornada).length;
+  if (D.combustible.ok && sinComb) av += '<div class="aviso warn">' + sinComb + ' día(s) anteriores al ' + fDia(D.cfg.COMB_DESDE || '0000-00-00') + ' con combustible estimado (Leandro todavía no registraba).</div>';
   (D.meses || []).filter(m => m.cerrado).forEach(m => { av += '<div class="aviso ok">Mes ' + m.mes.slice(5) + '/' + m.mes.slice(2,4) + ' cerrado: los alquileres se prorratearon por los ' + m.trabajados + ' días realmente trabajados.</div>'; });
   document.getElementById('avisos').innerHTML = av;
 
@@ -312,7 +312,7 @@ function render() {
 
   // tablas
   document.getElementById('tDias').innerHTML = '<tr><th>Fecha</th><th class="n">t</th><th class="n">Viajes</th><th class="n">Comb.</th><th class="n">Costo</th><th class="n">Costo/t</th><th class="n">Prom. obra</th><th class="n">Utilidad</th><th class="n">Acum.</th><th>Obs</th><th></th></tr>' +
-    [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button onclick="editar(\'' + x.fecha + '\')" style="border:0;background:none;color:var(--azul);font-weight:600">editar</button></td></tr>').join('');
+    [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : x.combFuente === 'sin consumo' ? '<span class="tag">sin consumo</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button onclick="editar(\'' + x.fecha + '\')" style="border:0;background:none;color:var(--azul);font-weight:600">editar</button></td></tr>').join('');
   document.getElementById('tPuntas').innerHTML = '<tr><th>Fecha</th><th class="n">Juegos</th><th>Obs</th></tr>' + (D.recambios.length ? D.recambios.map(r => '<tr><td>' + fDiaL(r.fecha) + '</td><td class="n">' + r.juegos + '</td><td>' + (r.obs||'') + '</td></tr>').join('') : '<tr><td colspan="3" class="small">Sin recambios registrados.</td></tr>');
 
   // charts
@@ -342,9 +342,10 @@ const CFG_CAMPOS = [
   ['Combustible', 'COMB_ESTIMADO_ARS', 'Gasoil estimado por día ($) si no hay dato real', 'numeric'],
   ['Combustible', 'COMB_CON_IVA', 'Los montos de combustible incluyen IVA (1 = sí, 0 = no)', 'numeric'],
   ['Combustible', 'IVA', 'IVA (0,21)', 'decimal'],
-  ['Combustible', 'COMB_DESDE', 'Desde qué fecha se toma el real de Leandro (AAAA-MM-DD)', 'text'],
+  ['Combustible', 'COMB_DESDE', 'Desde qué fecha hay registro real (AAAA-MM-DD). Antes: estimado. Desde acá: planillas, y sin registro = sin consumo', 'text'],
   ['Combustible', 'COMB_EXCLUIR', 'Equipos a excluir del combustible (coma). El camión batea va en el flete', 'text'],
-  ['Combustible', 'OBRA_COMBUSTIBLE', 'Texto con que Leandro identifica la obra en su planilla', 'text'],
+  ['Combustible', 'OBRA_COMBUSTIBLE', 'Texto con que Leandro identifica la obra en su planilla (equipos)', 'text'],
+  ['Combustible', 'COMB_CAMIONETAS', 'Camionetas en la planilla de Tiburcio: operarios o códigos separados por coma (ej. Hugo Castaño, CMT-22)', 'text'],
   ['Personal', 'MO_USD', 'Mano de obra por día (USD)', 'decimal'],
   ['Personal', 'SENAL_USD', 'Señalización por día (USD)', 'decimal'],
   ['Puntas de fresadora', 'PUNTAS_JUEGO_ARS', 'Precio del juego de 200 puntas ($, con IVA)', 'numeric'],
@@ -454,8 +455,8 @@ function detalleDia(i) {
   return [
     'Toneladas: ' + fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)'),
     'Viajes de mezcla: ' + x.viajes,
-    'Combustible: ' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? ' (manual)' : x.combFuente === 'real' ? ' (' + fmtN(x.litros,0) + ' l real)' : ' (estimado)'),
-  ].concat((x.combDet || []).map(r => '   · ' + (r.equipo || 'sin equipo') + ': ' + fmtN(r.litros,0) + ' l')).concat([
+    'Combustible: ' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? ' (manual)' : x.combFuente === 'real' ? ' (' + fmtN(x.litros,0) + ' l real)' : x.combFuente === 'sin consumo' ? ' (sin carga registrada)' : ' (estimado)'),
+  ].concat((x.combDet || []).map(r => '   · ' + (r.equipo || 'sin equipo') + (r.fuente === 'camioneta' && r.operario ? ' (' + r.operario + ')' : '') + ': ' + fmtN(r.litros,0) + ' l')).concat([
     'Fijos: ' + fmtUSD(x.fijos) + ' (equipos ' + fmtUSD(x.equiposDia) + '/día' + eqN(x) + (x.mesCerrado ? ', mes cerrado ÷ ' + x.diasMes + ' días trabajados' : ', ÷ ' + x.diasMes + ' días/mes') + ') · Flete: ' + fmtUSD(x.flete) + ' · Puntas: ' + fmtUSD(x.puntas),
     'Costo del día: ' + fmtUSD(x.costo) + ' → ' + fmtUSD2(x.costoT) + '/t',
     'Facturación: ' + fmtUSD(x.fact) + ' · Utilidad: ' + fmtUSD(x.utilidad),
@@ -479,7 +480,9 @@ function preview() {
   document.getElementById('fV').placeholder = 'auto: ' + Math.ceil(t / D.cfg.CAP);
   const fijos = jornada ? D.base.fijoDia : 0;
   const cIn = document.getElementById('fComb').value;
-  const comb = cIn !== '' ? Number(cIn) / (D.cfg.COMB_CON_IVA ? 1 + D.cfg.IVA : 1) / D.cfg.TC : (jornada ? D.base.combEstUSD : 0);
+  const fIn = document.getElementById('fFecha').value;
+  const conReal = !!(D.cfg.COMB_DESDE && fIn >= D.cfg.COMB_DESDE);
+  const comb = cIn !== '' ? Number(cIn) / (D.cfg.COMB_CON_IVA ? 1 + D.cfg.IVA : 1) / D.cfg.TC : (jornada && !conReal ? D.base.combEstUSD : 0);
   const flete = viajes * D.base.fleteUSD, puntas = t * D.base.puntasPorT;
   const costo = fijos + comb + flete + puntas, fact = t * D.cfg.PRECIO_T, u = fact - costo;
   const f = document.getElementById('fFecha').value;
@@ -490,7 +493,7 @@ function preview() {
     (existe ? '<b>Ya hay carga para esta fecha (' + fmtN(existe.t,1) + ' t). Al guardar se reemplaza.</b><br>' : '') +
     'Costo estimado del día: <b>' + fmtUSD(costo) + '</b> · ' + fmtUSD2(t > 0 ? costo/t : null) + '/t<br>' +
     'Facturación: <b>' + fmtUSD(fact) + '</b> · Utilidad: <b class="' + (u>=0?'pos':'neg') + '">' + fmtUSD(u) + '</b>' +
-    '<br><span class="small">' + (cIn !== '' ? 'Combustible cargado a mano.' : 'Combustible estimado; se reemplaza por el real cuando Leandro cargue las entregas.') + '</span>' + advFlete;
+    '<br><span class="small">' + (cIn !== '' ? 'Combustible cargado a mano.' : (D.cfg.COMB_DESDE && fIn >= D.cfg.COMB_DESDE ? 'Combustible: el que registren Leandro (equipos) y Tiburcio (camionetas) para este día; sin registro = sin consumo.' : 'Combustible estimado (día anterior al registro de Leandro).')) + '</span>' + advFlete;
 }
 
 function guardar() {
