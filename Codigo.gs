@@ -340,14 +340,17 @@ function consumosCombustible_(porDia, desde) {
       const k = r.fuente + '|' + (r.codigo || r.patente || r.equipo || 'sin equipo');
       if (!eqs[k]) eqs[k] = { equipo: r.equipo || 'Sin equipo', codigo: r.codigo, patente: r.patente, fuente: r.fuente, operarios: {}, cargas: [], litros: 0, ars: 0 };
       const e = eqs[k];
-      e.cargas.push({ fecha: f, litros: r.litros, ars: r.ars, hor: r.hor, operario: r.operario });
+      e.cargas.push({ fecha: r.fecha || f, litros: r.litros, ars: r.ars, hor: r.hor, operario: r.operario });
       e.litros += r.litros; e.ars += r.ars;
       if (r.operario) e.operarios[r.operario] = (e.operarios[r.operario] || 0) + 1;
     });
   });
   return Object.values(eqs).map(e => {
+    e.cargas.sort((x, y) => x.fecha < y.fecha ? -1 : x.fecha > y.fecha ? 1 : 0);
     const lect = e.cargas.filter(c => c.hor !== null && c.hor > 0);
-    let consumo = null, unidad = e.fuente === 'camioneta' ? 'km/l' : 'l/h', delta = null, litrosTramo = null, aviso = '';
+    // Camiones y camionetas (CMN-/CMT-) llevan odómetro en km → km/l; el resto horómetro → l/h
+    const vehiculo = e.fuente === 'camioneta' || /^(cmn|cmt)/i.test(e.codigo || '') || /cami[oó]n|camioneta/i.test(e.equipo || '');
+    let consumo = null, unidad = vehiculo ? 'km/l' : 'l/h', delta = null, litrosTramo = null, aviso = '';
     if (lect.length >= 2) {
       const a = lect[0], b = lect[lect.length - 1];
       delta = b.hor - a.hor;
@@ -355,8 +358,8 @@ function consumosCombustible_(porDia, desde) {
       const ia = e.cargas.indexOf(a), ib = e.cargas.indexOf(b);
       litrosTramo = e.cargas.slice(ia + 1, ib + 1).reduce((s, c) => s + c.litros, 0);
       if (delta > 0 && litrosTramo > 0) {
-        consumo = e.fuente === 'camioneta' ? delta / litrosTramo : litrosTramo / delta;
-        const raro = e.fuente === 'camioneta' ? (consumo < 3 || consumo > 25) : (consumo < 1 || consumo > 80);
+        consumo = vehiculo ? delta / litrosTramo : litrosTramo / delta;
+        const raro = vehiculo ? (consumo < 1.5 || consumo > 25) : (consumo < 1 || consumo > 80);
         if (raro) aviso = 'Valor fuera de lo normal: revisar las lecturas en la planilla';
       } else aviso = delta <= 0 ? 'Las lecturas no avanzan (' + a.hor + ' \u2192 ' + b.hor + '): revisar la planilla' : 'Sin cargas despu\u00e9s de la primera lectura';
     } else aviso = lect.length === 1 ? 'Una sola lectura: hace falta otra carga con hor\u00f3metro/od\u00f3metro' : 'Sin lecturas de hor\u00f3metro/od\u00f3metro en las cargas';
@@ -450,6 +453,17 @@ function getDatos(user) {
     if (f > fin) break;
     if (!esFinde(f) || porFecha[f]) calendario.push(f);   // hábiles + fines de semana con carga
   }
+  // Gasoil cargado un día fuera del calendario (fin de semana sin producción) se imputa al día de obra siguiente
+  // (es la carga para arrancar el lunes); si todavía no hay día siguiente, al último día de obra.
+  const calSet = {}; calendario.forEach(f => calSet[f] = true);
+  Object.keys(comb.porDia).sort().forEach(f => {
+    if (calSet[f] || (combDesde && f < combDesde) || !calendario.length) return;
+    const dest = calendario.filter(c => c > f)[0] || calendario[calendario.length - 1];
+    const d = comb.porDia[dest] || (comb.porDia[dest] = { litros: 0, ars: 0, registros: [] });
+    const s = comb.porDia[f];
+    d.litros += s.litros; d.ars += s.ars; d.registros = d.registros.concat(s.registros);
+    delete comb.porDia[f];
+  });
   // Alquileres mensuales: mes cerrado → prorrateo por los días de obra de ese mes; mes en curso → DIAS_MES.
   // Cada equipo cuenta solo desde su fecha DESDE (vacía = desde el inicio de obra); antes, sin costo.
   const meses = {};

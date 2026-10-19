@@ -1,5 +1,5 @@
 // SW minimo: hace la PWA instalable y sirve la cascara sin red. Los datos siempre van a la API.
-const CACHE = 'autovias-v18';
+const CACHE = 'autovias-v19';
 const ASSETS = ['./', './index.html', './manifest.json', './logo.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(a => new Request(a, { cache: 'reload' })))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
