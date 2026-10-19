@@ -9,7 +9,7 @@
 // ---------- IDs ----------
 const ID_COMBUSTIBLE = '19eyY8MImPM_-Gyzj8QcqA_yR5KDrkuu-1faJUU48N1A'; // Leandro Casares (Shared Drive): equipos de obra
 const ID_COMBUSTIBLE_CAMIONETAS = '1DD8BVoF6jX-CcakbbVO6fNJKYF82qBIK1YwyVLQcDJ8'; // Tiburcio Sanz: camionetas, se filtra por operario/código (CONFIG > COMB_CAMIONETAS)
-const COMB_CAMIONETAS_DEFAULT = 'Hugo Castaño';
+const COMB_CAMIONETAS_DEFAULT = 'Hugo Castaño, Gonzalo Salas';
 const HOJA_ENTREGAS = 'ENTREGAS';
 
 const TABS = { CONFIG: 'CONFIG', PROD: 'PRODUCCION', PUNTAS: 'PUNTAS', EQUIPOS: 'EQUIPOS' };
