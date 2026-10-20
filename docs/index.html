@@ -303,7 +303,7 @@ function render() {
     '<tr class="tot"><td>Equipos (÷ días del mes, findes incluidos)</td><td class="n">' + fmtUSD(b.equiposMes) + '</td><td class="n">' + fmtUSD(b.equiposDia) + '</td></tr>' +
     '<tr class="sec"><td>Otros fijos</td><td class="n">por mes</td><td class="n">por día</td></tr>' +
     '<tr><td>Mano de obra <span class="small">(mensual desde ' + fDia(b.moDesde) + '; antes ' + fmtUSD(b.moJornada) + ' por día trabajado)</span></td><td class="n">' + fmtUSD(b.moMes) + '</td><td class="n">' + fmtUSD(b.moDia) + '</td></tr>' +
-    '<tr><td>Señalización</td><td></td><td class="n">' + fmtUSD(b.senalDia) + '</td></tr>' +
+    '<tr><td>Señalización</td><td class="n">' + fmtUSD(b.senalMes) + '</td><td class="n">' + fmtUSD(b.senalDia) + '</td></tr>' +
     '<tr><td>Gasoil estimado <span class="small">(si no hay dato real)</span></td><td></td><td class="n">' + fmtUSD(b.combEstUSD) + '</td></tr>' +
     '<tr class="tot"><td>Total fijo por día</td><td></td><td class="n">' + fmtUSD(b.fijoDia + b.combEstUSD) + '</td></tr>' +
     '<tr class="sec"><td>Variables</td><td></td><td></td></tr>' +
@@ -378,7 +378,7 @@ const CFG_CAMPOS = [
   ['Personal', 'MO_MES_USD', 'Mano de obra por MES (USD): se divide por los días del mes y corre todos los días, findes incluidos', 'decimal'],
   ['Personal', 'MO_MES_DESDE', 'Desde qué fecha la gente se paga mensual (AAAA-MM-DD)', 'text'],
   ['Personal', 'MO_USD', 'Mano de obra por día trabajado (USD), antes de la fecha mensual', 'decimal'],
-  ['Personal', 'SENAL_USD', 'Señalización por día (USD)', 'decimal'],
+  ['Personal', 'SENAL_MES_USD', 'Señalización por MES (USD): se divide por los días del mes y corre todos los días, findes incluidos', 'decimal'],
   ['Puntas de fresadora', 'PUNTAS_JUEGO_ARS', 'Precio del juego de 200 puntas ($, con IVA)', 'numeric'],
   ['Puntas de fresadora', 'PUNTAS_VIDA_T', 't fresadas por juego (estimado hasta tener recambios)', 'numeric'],
   ['Acceso', 'PIN', 'PIN de la app', 'text'],
