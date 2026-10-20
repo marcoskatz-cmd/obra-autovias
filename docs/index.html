@@ -64,6 +64,8 @@ canvas{width:100%!important;max-height:280px;touch-action:pan-y}
 .det .r{display:flex;justify-content:space-between;gap:8px}.det .sp{height:6px}
 .det b.pos{color:var(--ok)}.det b.neg{color:var(--mal)}
 .hint0{color:#6b7280}
+.crit h4{margin:14px 0 4px;font-size:13px;color:var(--azul)}.crit h4:first-child{margin-top:0}
+.crit ul{margin:0;padding-left:18px;font-size:13px;line-height:1.5}.crit li{margin-bottom:3px}
 .aviso{border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .aviso.warn{background:#fff6e5;border:1px solid #f0c36d;color:#7a4e00}
 .aviso.mal{background:#fdecea;border:1px solid #f1a6a0;color:#7b1d14}
@@ -169,11 +171,12 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--azul)}dd{margin
     <div class="hint">Tocá un grupo para abrirlo. Los cambios se aplican al guardar y recalculan todo el panel.</div>
     <div id="cfgForm"></div>
     <details class="grp" id="grpEq"><summary>Equipos alquilados <span class="small" id="eqCount"></span></summary>
-      <div class="hint">Precio mensual de cada equipo; los propios van en 0. Se prorratea por los días laborables del mes. "Cuenta desde" es el primer día que se imputa ese alquiler (vacío = desde el inicio de obra); los días anteriores van sin costo.</div>
+      <div class="hint">Precio mensual de cada equipo; los propios van en 0. Se divide por los días del mes calendario y corre todos los días, fines de semana incluidos. "Cuenta desde" es el primer día que se imputa ese alquiler (vacío = desde el inicio de obra); los días anteriores van sin costo.</div>
       <div id="eqList"></div>
       <button class="btn sec2" onclick="agregarEquipo()">+ Agregar equipo</button>
     </details>
   </div>
+  <div class="card crit"><h3>Criterios de cálculo</h3><div id="criterios"></div></div>
   <div class="savebar" id="savebar"><span id="saveMsg">Hay cambios sin guardar</span><button class="btn" id="bCfg" onclick="guardarConfig()">Guardar</button><button class="btn sec2" onclick="descartarConfig()">Descartar</button></div>
 </section>
 
@@ -346,6 +349,7 @@ function render() {
   } };
   dibujar('chDia');
   simular(tProm);
+  renderCriterios();
   preview();
 }
 // ---------- combustible real (Costos) ----------
@@ -405,10 +409,49 @@ function dirty() {
   document.getElementById('savebar').classList.toggle('on', d);
 }
 function descartarConfig() { CFG = null; cargarCostos(); }
+// Texto con todos los criterios de cálculo, con los valores vigentes
+function renderCriterios() {
+  const el = document.getElementById('criterios'); if (!el || !D) return;
+  const c = CFG || {}, b = D.base, k = (n, d) => c[n] != null && c[n] !== '' ? c[n] : d;
+  const ars = v => '$ ' + Number(v).toLocaleString('es-AR', {maximumFractionDigits:0});
+  const g = (t, items) => '<h4>' + t + '</h4><ul>' + items.map(x => '<li>' + x + '</li>').join('') + '</ul>';
+  el.innerHTML =
+    g('General', [
+      'Todo se calcula en <b>dólares, sin IVA</b>. Los montos en pesos se pasan a USD con el tipo de cambio de Costos (hoy ' + ars(D.cfg.TC) + ').',
+      'Los montos que vienen con IVA (combustible de las planillas, puntas, equipos marcados "con IVA") se netean dividiendo por 1 + IVA (' + fmtN(D.cfg.IVA * 100, 0) + ' %).',
+      'La obra empieza el <b>' + fDia(k('OBRA_INICIO', D.inicio)) + '</b>: desde ese día se cuenta cada día del calendario hasta hoy.',
+      '<b>Facturación</b> del día = toneladas colocadas × precio pactado (' + fmtUSD2(D.cfg.PRECIO_T) + '/t, sin IVA).',
+      '<b>Utilidad</b> del día = facturación − costo del día. La acumulada es la suma desde el inicio.',
+      '<b>Costo por tonelada</b> del día = costo del día ÷ t colocadas ese día. El promedio de obra = costo acumulado ÷ t acumuladas.',
+    ]) +
+    g('Costos fijos (corren todos los días, se trabaje o no, fines de semana incluidos)', [
+      '<b>Equipos alquilados</b>: se pagan por mes. El precio mensual de cada equipo se divide por los días del mes calendario (31 en octubre, 30 en noviembre…) y se imputa todos los días. Cada equipo cuenta desde su fecha "desde"; antes no tiene costo. Los equipos propios van en 0.',
+      '<b>Mano de obra</b>: hasta el ' + fDia(prevDia(b.moDesde)) + ' se pagó por jornada: ' + fmtUSD(b.moJornada) + ' solo los días que se tiró mezcla. Desde el <b>' + fDia(b.moDesde) + '</b> es mensual: ' + fmtUSD(b.moMes) + '/mes ÷ días del mes, todos los días.',
+      '<b>Señalización</b>: mensual, ' + fmtUSD(b.senalMes) + '/mes ÷ días del mes, todos los días.',
+    ]) +
+    g('Costos variables (solo los días con producción)', [
+      '<b>Flete de mezcla</b>: ' + ars(k('FLETE_ARS', b.fleteUSD * D.cfg.TC)) + ' por viaje entero sin IVA (' + fmtUSD(b.fleteUSD) + '). Se usan los viajes cargados en el día; si no se cargaron, se calcula t ÷ ' + D.cfg.CAP + ' t por camión, redondeado para arriba.',
+      '<b>Puntas de fresadora</b>: juego de 200 puntas a ' + ars(k('PUNTAS_JUEGO_ARS', 0)) + ' con IVA. Por cada t colocada se fresan ' + k('SOBREFRESADO', '') + ' t. Vida del juego: ' + fmtN(b.vidaPuntas, 0) + ' t fresadas' + (b.vidaReal ? ' (real, calculada con los recambios cargados).' : ' (estimada; con 2 o más recambios cargados se recalcula con la vida real).') + ' Resultado: ' + fmtUSD2(b.puntasPorT) + ' por t colocada.',
+    ]) +
+    g('Combustible', [
+      'Prioridad para cada día: <b>1)</b> el monto cargado a mano en "Cargar día"; <b>2)</b> lo real de las planillas de combustible; <b>3)</b> antes del ' + fDia(D.cfg.COMB_DESDE) + ', un estimado de ' + ars(k('COMB_ESTIMADO_ARS', b.combEstUSD * D.cfg.TC)) + ' por día trabajado.',
+      'Real: equipos de la planilla de Leandro Casares con obra "' + (D.cfg.OBRA || '') + '", y camionetas de la planilla de Tiburcio Sanz (' + (D.cfg.CAMIONETAS || '—') + ').',
+      'Desde el ' + fDia(D.cfg.COMB_DESDE) + ', un día sin cargas registradas cuenta como sin consumo ($ 0).',
+      'Se excluye: ' + (k('COMB_EXCLUIR', '') || '—') + ' (el camión batea va dentro del flete).',
+      'Los montos de las planillas ' + (D.cfg.COMB_CON_IVA ? 'vienen con IVA y se netean.' : 'se toman sin IVA.'),
+      'Gasoil cargado un fin de semana sin producción se imputa al siguiente día de obra (es la carga para arrancar el lunes).',
+    ]) +
+    g('Simulación "Según producción diaria"', [
+      'Costo de un día tipo = fijos diarios vigentes + gasoil estimado + viajes de flete necesarios + puntas por t. Los escalones son cada viaje de mezcla adicional.',
+      'Los fijos de la simulación toman el mensual ÷ 30 días. El punto rojo es el promedio de t por día de obra.',
+    ]);
+}
+const prevDia = f => { if (!f) return ''; const d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); };
+
 function cargarCostos() {
   api('config').then(c => {
     CFG = {}; c.config.forEach(r => CFG[r.clave] = r.valor);
-    EQ = c.equipos;
+    EQ = c.equipos; renderCriterios();
     let h = '', g = '';
     CFG_CAMPOS.forEach(([grupo, k, label, mode]) => {
       if (grupo !== g) { if (g) h += '</div></details>'; g = grupo; h += '<details class="grp"><summary>' + grupo + '</summary><div class="in">'; }
