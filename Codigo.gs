@@ -124,7 +124,9 @@ function setup() {
     ['CAP_CAMION', 30, 't por viaje de mezcla'],
     ['FLETE_ARS', 625000, '$ por viaje entero sin IVA'],
     ['COMB_ESTIMADO_ARS', 700000, '$/día estimado — se usa solo si no hay carga real ese día'],
-    ['MO_USD', 705, 'USD/día mano de obra (12 personas)'],
+    ['MO_USD', 705, 'USD/día mano de obra pagada por jornada (antes de MO_MES_DESDE, solo días con carga)'],
+    ['MO_MES_USD', 15510, 'USD/mes mano de obra (desde MO_MES_DESDE): se divide por los días del mes y corre todos los días, findes incluidos'],
+    ['MO_MES_DESDE', '2026-10-13', 'Desde qué fecha la gente se paga mensual. Antes: MO_USD por día trabajado'],
     ['SENAL_USD', 333, 'USD/día señalización'],
     ['PUNTAS_JUEGO_ARS', 6134000, '$ juego de 200 puntas CON IVA'],
     ['PUNTAS_VIDA_T', 1400, 't fresadas por juego = 200 puntas × 7 t/punta (estimado; se recalcula con recambios reales)'],
@@ -179,6 +181,14 @@ function leerConfig_() {
     sh.appendRow(['COMB_CAMIONETAS', COMB_CAMIONETAS_DEFAULT, 'Camionetas de la obra en la planilla de Tiburcio Sanz: operarios o códigos (ej. "Hugo Castaño, CMT-22"), separados por coma. Contiene, sin tildes']);
     o.COMB_CAMIONETAS = COMB_CAMIONETAS_DEFAULT;
   }
+  if (!('MO_MES_USD' in o)) {
+    o.MO_MES_USD = Math.round(Number(o.MO_USD || 705) * 22);
+    sh.appendRow(['MO_MES_USD', o.MO_MES_USD, 'USD/mes mano de obra (desde MO_MES_DESDE): se divide por los días del mes y corre todos los días, findes incluidos']);
+  }
+  if (!('MO_MES_DESDE' in o)) {
+    o.MO_MES_DESDE = '2026-10-13';
+    sh.appendRow(['MO_MES_DESDE', "'2026-10-13", 'Desde qué fecha la gente se paga mensual. Antes: MO_USD por día trabajado']);
+  }
   return o;
 }
 
@@ -221,7 +231,7 @@ function leerEquipos_() {
   }));
 }
 
-const CLAVES_NUM = ['TC', 'IVA', 'COMB_CON_IVA', 'DIAS_MES', 'PRECIO_T', 'SOBREFRESADO', 'CAP_CAMION', 'FLETE_ARS', 'COMB_ESTIMADO_ARS', 'MO_USD', 'SENAL_USD', 'PUNTAS_JUEGO_ARS', 'PUNTAS_VIDA_T'];
+const CLAVES_NUM = ['TC', 'IVA', 'COMB_CON_IVA', 'DIAS_MES', 'PRECIO_T', 'SOBREFRESADO', 'CAP_CAMION', 'FLETE_ARS', 'COMB_ESTIMADO_ARS', 'MO_USD', 'MO_MES_USD', 'SENAL_USD', 'PUNTAS_JUEGO_ARS', 'PUNTAS_VIDA_T'];
 
 function guardarConfig(p, user) {
   if (!user) throw new Error('Sin permiso');
@@ -268,7 +278,7 @@ function costoEquiposDia_(cfg) {
     if (e.conIva === 1) usd = usd / (1 + Number(cfg.IVA));
     mes += usd; detalle.push({ equipo: e.equipo, usdMes: usd, desde: e.desde || '' });
   });
-  return { dia: mes / Number(cfg.DIAS_MES), mes, detalle };
+  return { dia: mes / 30, mes, detalle };
 }
 
 // ---------- Combustible real: equipos (planilla de Leandro) + camionetas (planilla de Tiburcio) ----------
@@ -420,7 +430,7 @@ function getDatos(user) {
   const cfg = leerConfig_();
   const TC = Number(cfg.TC), IVA = Number(cfg.IVA);
   const eq = costoEquiposDia_(cfg);
-  const fijoDia = eq.dia + Number(cfg.MO_USD) + Number(cfg.SENAL_USD);
+  const fijoDia = eq.dia + Number(cfg.MO_MES_USD) / 30 + Number(cfg.SENAL_USD);
   const fleteUSD = Number(cfg.FLETE_ARS) / TC;
   const combEstUSD = Number(cfg.COMB_ESTIMADO_ARS) / TC;
   const puntasJuegoUSD = Number(cfg.PUNTAS_JUEGO_ARS) / (1 + IVA) / TC;
@@ -483,7 +493,7 @@ function getDatos(user) {
     d.litros += s.litros; d.ars += s.ars; d.registros = d.registros.concat(s.registros);
     delete comb.porDia[f];
   });
-  // Alquileres mensuales: mes cerrado → prorrateo por los días de obra de ese mes; mes en curso → DIAS_MES.
+  // Alquileres mensuales: se prorratean por los días del mes calendario (ver equiposDiaEn).
   // Cada equipo cuenta solo desde su fecha DESDE (vacía = desde el inicio de obra); antes, sin costo.
   const meses = {};
   calendario.forEach(f => { const m = f.slice(0, 7); if (!meses[m]) meses[m] = { mes: m, diasObra: 0, conCarga: 0, cerrado: hoy.slice(0, 7) > m, equiposDia: eq.dia }; if (esDiaObra(f)) meses[m].diasObra++; if (porFecha[f] && porFecha[f].t > 0) meses[m].conCarga++; });
@@ -491,12 +501,14 @@ function getDatos(user) {
   // días de obra de cada equipo en cada mes (para prorratear meses cerrados)
   const diasEq = {};   // mes -> [días activos por equipo]
   diasObra.forEach(f => { const m = f.slice(0, 7); if (!diasEq[m]) diasEq[m] = eq.detalle.map(() => 0); eq.detalle.forEach((e, i) => { if (activo(e, f)) diasEq[m][i]++; }); });
-  const equiposDiaEn = f => {
-    const m = f.slice(0, 7), cerrado = meses[m].cerrado;
-    return eq.detalle.reduce((s, e, i) => !activo(e, f) ? s : s + (cerrado && diasEq[m][i] > 0 ? e.usdMes / diasEq[m][i] : e.usdMes / Number(cfg.DIAS_MES)), 0);
-  };
+  // Equipos y personal se pagan por mes: el mensual se divide por los días del mes calendario y
+  // corre todos los días (findes incluidos), se trabaje o no.
+  const diasDelMes = f => new Date(Number(f.slice(0, 4)), Number(f.slice(5, 7)), 0).getDate();
+  const equiposDiaEn = f => eq.detalle.reduce((s, e) => !activo(e, f) ? s : s + e.usdMes / diasDelMes(f), 0);
+  const moDesde = fechaStr_(cfg.MO_MES_DESDE) || inicio;
+  const moDiaEn = (f, jornada) => f >= moDesde ? Number(cfg.MO_MES_USD) / diasDelMes(f) : (jornada ? Number(cfg.MO_USD) : 0);
   const equiposActivosEn = f => eq.detalle.filter(e => activo(e, f) && e.usdMes > 0).length;
-  Object.values(meses).forEach(m => { const fs = diasObra.filter(f => f.slice(0, 7) === m.mes); if (fs.length) m.equiposDia = fs.reduce((s, f) => s + equiposDiaEn(f), 0) / fs.length; });
+  Object.values(meses).forEach(m => { m.equiposDia = equiposDiaEn(m.mes + '-28'); m.diasMes = diasDelMes(m.mes + '-01'); });
 
   let acum = { t: 0, costo: 0, fact: 0, dias: 0, diasConCarga: 0, comb: 0, flete: 0, fijos: 0, puntas: 0 };
   const serie = calendario.map(f => {
@@ -504,8 +516,10 @@ function getDatos(user) {
     const jornada = d.sinCarga ? 0 : d.jornada;
     const mesInfo = meses[f.slice(0, 7)];
     const libre = !esDiaObra(f);   // finde sin carga: se muestra pero no cuesta
-    const equiposDiaUsado = libre ? 0 : equiposDiaEn(f);
-    const fijos = libre ? 0 : equiposDiaUsado + Number(cfg.MO_USD) + Number(cfg.SENAL_USD);   // todos los días de obra
+    const equiposDiaUsado = equiposDiaEn(f);
+    const moDia = moDiaEn(f, jornada);
+    const senal = libre ? 0 : Number(cfg.SENAL_USD);   // señalización: solo días de obra
+    const fijos = equiposDiaUsado + moDia + senal;
     // Combustible: manual del día > real de las planillas > antes de COMB_DESDE estimado; desde COMB_DESDE,
     // si no hay carga registrada es porque no hubo consumo (0).
     const conReal = !combDesde || f >= combDesde;
@@ -522,7 +536,7 @@ function getDatos(user) {
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
       fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), libre, obs: d.obs, por: d.por,
-      fijos, equiposDia: equiposDiaUsado, equiposN: equiposActivosEn(f), diasMes: mesInfo.cerrado ? mesInfo.diasObra : Number(cfg.DIAS_MES), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
+      fijos, equiposDia: equiposDiaUsado, moDia, senal, equiposN: equiposActivosEn(f), diasMes: diasDelMes(f), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,
     };
@@ -530,7 +544,7 @@ function getDatos(user) {
 
   return {
     cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE, COMB_DESDE: combDesde, CAMIONETAS: String(cfg.COMB_CAMIONETAS || '') },
-    base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_USD), senalDia: Number(cfg.SENAL_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
+    base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_MES_USD) / 30, moMes: Number(cfg.MO_MES_USD), moJornada: Number(cfg.MO_USD), moDesde: fechaStr_(cfg.MO_MES_DESDE), senalDia: Number(cfg.SENAL_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
     serie, acum, recambios, meses: Object.values(meses), inicio,
     equiposTotal: eq.detalle.filter(e => e.usdMes > 0).length,
     combustible: comb.diag,
