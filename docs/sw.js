@@ -2,7 +2,7 @@
 const CACHE = 'autovias-v24';
 const ASSETS = ['./', './index.html', './manifest.json', './logo.png', './icon-192.png', './icon-512.png'];
 // Estilo común de la App INGECO: red primero (siempre la última), caché solo sin señal.
-const COMUN = 'https://marcoskatz-cmd.github.io/app-ingeco/ingeco.';
+const COMUN = 'https://app.ingecosa.com.ar/ingeco.';
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(a => new Request(a, { cache: 'reload' })))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
