@@ -297,6 +297,8 @@ function render() {
   const tProm = a.dias ? a.t / a.dias : null;
   const margen = a.fact > 0 ? utilObra / a.fact : null;
   const k = [
+    ['Días trabajados', fmtN(a.diasConCarga,0), 'días con producción cargada · ' + a.dias + ' días de obra corridos', ''],
+    ['Toneladas totales', fmtN(a.t,0) + ' t', 'tiradas desde el inicio de la obra', ''],
     ['Resultado de la obra', fmtUSD(utilObra), (utilObra >= 0 ? 'ganando' : 'perdiendo') + ' · facturado ' + fmtUSD(a.fact) + ' · costo ' + fmtUSD(a.costo), utilObra >= 0 ? 'ok' : 'mal', 'big'],
     ['Costo/t último día', ult ? fmtUSD2(ult.costoT) : '—', ult ? fDiaL(ult.fecha) + ' · ' + fmtN(ult.t,1) + ' t' : 'sin datos', ult && ult.costoT != null ? (ult.costoT <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
     ['Costo/t promedio obra', fmtUSD2(costoObra), a.t ? fmtN(a.t,0) + ' t en ' + a.dias + ' días de obra' : '', costoObra != null ? (costoObra <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
@@ -304,7 +306,7 @@ function render() {
     ['Utilidad promedio/día', fmtUSD(utilProm), 'en ' + a.dias + ' días', utilProm != null ? (utilProm >= 0 ? 'ok' : 'mal') : ''],
     ['Toneladas promedio/día', fmtN(a.diasConCarga ? a.t / a.diasConCarga : null,1), 'en ' + a.diasConCarga + ' días con carga · ' + fmtN(tProm,1) + ' t por día de obra', ''],
     ['Margen sobre facturación', margen == null ? '—' : fmtN(margen*100,1) + '%', 'facturado ' + fmtUSD(a.fact), margen != null ? (margen >= 0.1 ? 'ok' : margen >= 0 ? '' : 'mal') : ''],
-    ['Punto de equilibrio', fmtN((D.base.fijoDia + D.base.combEstUSD) / (D.cfg.PRECIO_T - D.base.puntasPorT - D.base.fleteUSD / D.cfg.CAP),0) + ' t/día', 'con combustible estimado y flete prorrateado', ''],
+    ['Punto de equilibrio (mín. t/día)', fmtN((D.base.fijoDia + D.base.combEstUSD) / (D.cfg.PRECIO_T - D.base.puntasPorT - D.base.fleteUSD / D.cfg.CAP),0) + ' t/día', 'mínimo a tirar por día para no perder plata (cubre equipos, personal, gasoil, flete y puntas)', ''],
     ['Costo fijo diario', fmtUSD(D.base.fijoDia + D.base.combEstUSD), 'equipos + MO + señal. + comb. est.', ''],
   ];
   document.getElementById('kpis').innerHTML = k.map(x => '<div class="kpi ' + x[3] + (x[4] ? ' ' + x[4] : '') + '"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
