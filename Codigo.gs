@@ -53,6 +53,11 @@ function doPost(e) {
       case 'guardarConfig': data = guardarConfig(p, user); break;
       default: throw new Error('Acción desconocida: ' + body.accion);
     }
+    // con_all: tras guardar, devuelve también el estado completo para evitar el segundo viaje (front viejo lo ignora)
+    if (body.con_all && /^guardar|^borrar/.test(body.accion)) {
+      SpreadsheetApp.flush();
+      data = Object.assign({}, data, { all: getDatos(user) });
+    }
     return json_({ ok: true, data, usuario: user });
   } catch (err) {
     return json_({ ok: false, error: err.message || String(err) });

@@ -222,10 +222,10 @@ function credenciales() {
   try { const c = JSON.parse(localStorage.getItem('autovias_cred') || 'null'); if (c && c.pin) return c; } catch (e) {}
   return null;
 }
-async function api(accion, payload) {
+async function api(accion, payload, conAll) {
   const cred = CRED || credenciales();
   if (!cred) throw new Error('Sin credenciales');
-  const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ accion, payload: payload || {} }, cred)) });
+  const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ accion, payload: payload || {} }, conAll ? { con_all: 1 } : {}, cred)) });
   const j = await r.json();
   if (!j.ok) { if (/PIN incorrecto|Sin permiso/.test(j.error || '')) { localStorage.removeItem('autovias_cred'); CRED = null; mostrarLogin(); } throw new Error(j.error || 'Error'); }
   return j.data;
@@ -243,7 +243,7 @@ async function login() {
   } catch (e) { CRED = null; toast(e.message, 'mal'); }
   b.disabled = false; b.textContent = 'Entrar';
 }
-function salir() { localStorage.removeItem('autovias_cred'); CRED = null; D = null; CFG = null; mostrarLogin(); }
+function salir() { localStorage.removeItem('autovias_cred'); try { localStorage.removeItem(CACHE_D); } catch (e) {} CRED = null; D = null; CFG = null; mostrarLogin(); }
 document.getElementById('lPin').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 const fmtUSD = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-AR', {maximumFractionDigits:0});
 const fmtUSD2 = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-AR', {minimumFractionDigits:1, maximumFractionDigits:1});
@@ -260,9 +260,13 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
 
 function toast(msg, tipo) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast on ' + (tipo||''); setTimeout(() => t.className = 'toast', 3200); }
 
+// Caché del último 'datos': se pinta al instante al abrir y se refresca en segundo plano.
+const CACHE_D = 'autovias_datos_v1';
+function aplicarDatos(d) { if (!d) return; D = d; render(); try { localStorage.setItem(CACHE_D, JSON.stringify(d)); } catch (e) {} }
 function cargar() {
   if (!(CRED || credenciales())) return mostrarLogin();
-  api('datos').then(d => { D = d; render(); }).catch(e => toast('Error al cargar: ' + e.message, 'mal'));
+  if (!D) { try { const c = JSON.parse(localStorage.getItem(CACHE_D) || 'null'); if (c) { D = c; render(); } } catch (e) { D = null; } }
+  api('datos').then(aplicarDatos).catch(e => toast('Error al cargar: ' + e.message, 'mal'));
 }
 
 function render() {
@@ -503,11 +507,11 @@ function guardarConfig() {
   document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) config[i.dataset.k] = i.value; });
   if (config.PIN !== undefined && !confirm('¿Cambiar el PIN de acceso? Todos van a tener que volver a entrar con el nuevo.')) return;
   const b = document.getElementById('bCfg'); b.disabled = true; b.textContent = 'Guardando…';
-  api('guardarConfig', { config, equipos: EQ }).then(() => {
+  api('guardarConfig', { config, equipos: EQ }, true).then(r => {
     CFG = null;
     toast('Costos guardados', 'ok');
     if (config.PIN !== undefined && CRED && CRED.pin) { CRED.pin = String(config.PIN).trim(); localStorage.setItem('autovias_cred', JSON.stringify(CRED)); }
-    cargarCostos(); cargar();
+    cargarCostos(); if (r && r.all) aplicarDatos(r.all); else cargar();
   }).catch(e => toast(e.message, 'mal')).finally(() => { b.disabled = false; b.textContent = 'Guardar'; });
 }
 
@@ -636,18 +640,18 @@ function guardar() {
   if (t === '' ) return toast('Falta la cantidad de toneladas', 'mal');
   if (fecha > D.hoy) return toast('No se puede cargar una fecha futura', 'mal');
   const b = document.getElementById('bGuardar'); b.disabled = true; b.textContent = 'Guardando…';
-  api('guardarDia', { fecha, t, viajes: document.getElementById('fV').value, obs: document.getElementById('fObs').value, jornada, comb: document.getElementById('fComb').value }).then(r => {
+  api('guardarDia', { fecha, t, viajes: document.getElementById('fV').value, obs: document.getElementById('fObs').value, jornada, comb: document.getElementById('fComb').value }, true).then(r => {
     b.disabled = false; b.textContent = 'Guardar día';
     toast(r.editado ? 'Día actualizado' : 'Día guardado', 'ok');
     document.getElementById('fT').value = ''; document.getElementById('fV').value = ''; document.getElementById('fObs').value = ''; document.getElementById('fComb').value = ''; setJ(1);
-    cargar();
+    if (r && r.all) aplicarDatos(r.all); else cargar();
   }).catch(e => { b.disabled = false; b.textContent = 'Guardar día'; toast(e.message, 'mal'); });
 }
 function guardarPuntas() {
   const fecha = document.getElementById('pFecha').value, juegos = document.getElementById('pJ').value;
   if (!fecha || !juegos) return toast('Completá fecha y cantidad', 'mal');
-  api('guardarPuntas', { fecha, juegos, obs: document.getElementById('pObs').value })
-    .then(() => { toast('Recambio registrado', 'ok'); document.getElementById('pObs').value = ''; cargar(); }).catch(e => toast(e.message, 'mal'));
+  api('guardarPuntas', { fecha, juegos, obs: document.getElementById('pObs').value }, true)
+    .then(r => { toast('Recambio registrado', 'ok'); document.getElementById('pObs').value = ''; if (r && r.all) aplicarDatos(r.all); else cargar(); }).catch(e => toast(e.message, 'mal'));
 }
 function editar(fecha) {
   const x = D.serie.find(s => s.fecha === fecha); if (!x) return;

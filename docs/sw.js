@@ -1,5 +1,5 @@
 // SW minimo: hace la PWA instalable y sirve la cascara sin red. Los datos siempre van a la API.
-const CACHE = 'autovias-v24';
+const CACHE = 'autovias-v25';
 const ASSETS = ['./', './index.html', './manifest.json', './logo.png', './icon-192.png', './icon-512.png'];
 // Estilo común de la App INGECO: red primero (siempre la última), caché solo sin señal.
 const COMUN = 'https://app.ingecosa.com.ar/ingeco.';
