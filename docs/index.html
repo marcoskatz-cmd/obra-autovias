@@ -198,6 +198,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--tinta)}dd{margi
     <h3>Cómo se usa</h3>
     <dl>
       <dt>Todos los días, al cierre</dt><dd>Pestaña <b>Cargar día</b>: fecha, toneladas colocadas y guardar. Si cargás dos veces la misma fecha, se reemplaza el dato anterior.</dd>
+      <dt>Mezcla desde la planta</dt><dd>Los días que nadie carga a mano toman las toneladas que el plantista cargó para "Autovías" en el sistema <b>Stock de asfalto</b> (etiqueta <span class="tag">planta</span>). Si cargás el día a mano, vale lo tuyo y se avisa si no coincide con la planta.</dd>
       <dt>Viajes de mezcla</dt><dd>Se calculan solos (1 viaje cada 30 t, redondeando para arriba). Si el fletero facturó otra cantidad, corregilo en el campo.</dd>
       <dt>Combustible</dt><dd>Prioridad: el monto cargado a mano en el día (<span class="tag">manual</span>); si no, las planillas de entregas: la de Leandro Casares filtrada por la obra (equipos) más la de Tiburcio Sanz filtrada por operario o código (camionetas), ambas en <span class="tag">litros</span>. Desde la fecha en que Leandro empezó a registrar (Costos › Desde) un día sin carga es un día <span class="tag">sin consumo</span>. El estimado de Costos (<span class="tag est">est.</span>) solo se usa para los días anteriores a esa fecha.</dd>
       <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
@@ -289,6 +290,9 @@ function render() {
   // avisos
   let av = '';
   if (!D.combustible.ok) av += '<div class="aviso warn">⚠ ' + D.combustible.msg + '</div>';
+  if (D.planta && !D.planta.ok) av += '<div class="aviso warn">⚠ ' + D.planta.msg + '</div>';
+  const difPlanta = s.filter(x => x.tPlanta != null && !x.planta && Math.abs(x.tPlanta - x.t) > 0.5);
+  if (difPlanta.length) av += '<div class="aviso warn">' + difPlanta.length + ' día(s) donde lo cargado a mano no coincide con la mezcla que informó la planta: ' + difPlanta.map(x => fDia(x.fecha) + ' (' + fmtN(x.t,1) + ' vs ' + fmtN(x.tPlanta,1) + ' t)').join(', ') + '.</div>';
   const sinComb = s.filter(x => x.combFuente === 'estimado' && x.jornada).length;
   if (D.combustible.ok && sinComb) av += '<div class="aviso warn">' + sinComb + ' día(s) anteriores al ' + fDia(D.cfg.COMB_DESDE || '0000-00-00') + ' con combustible estimado (Leandro todavía no registraba).</div>';
   document.getElementById('avisos').innerHTML = av;
@@ -348,7 +352,7 @@ function render() {
 
   // tablas
   document.getElementById('tDias').innerHTML = '<tr><th>Fecha</th><th class="n">t</th><th class="n">Viajes</th><th class="n">Comb.</th><th class="n">Costo</th><th class="n">Costo/t</th><th class="n">Prom. obra</th><th class="n">Utilidad</th><th class="n">Acum.</th><th>Obs</th><th></th></tr>' +
-    [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.libre ? '<span class="tag">finde</span>' : x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : x.combFuente === 'sin consumo' ? '<span class="tag">sin consumo</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button class="editar" onclick="editar(\'' + x.fecha + '\')">editar</button></td></tr>').join('');
+    [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.libre ? '<span class="tag">finde</span>' : x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + (x.planta ? '<span class="tag">planta</span>' : (x.tPlanta != null && Math.abs(x.tPlanta - x.t) > 0.5 ? '<span class="tag est">planta ' + fmtN(x.tPlanta,1) + '</span>' : '')) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : x.combFuente === 'sin consumo' ? '<span class="tag">sin consumo</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button class="editar" onclick="editar(\'' + x.fecha + '\')">editar</button></td></tr>').join('');
   document.getElementById('tPuntas').innerHTML = '<tr><th>Fecha</th><th class="n">Juegos</th><th>Obs</th></tr>' + (D.recambios.length ? D.recambios.map(r => '<tr><td>' + fDiaL(r.fecha) + '</td><td class="n">' + r.juegos + '</td><td>' + (r.obs||'') + '</td></tr>').join('') : '<tr><td colspan="3" class="small">Sin recambios registrados.</td></tr>');
 
   // charts: un gráfico por tarjeta, con pestañas
@@ -576,7 +580,7 @@ function detalleDiaHTML(i) {
   const x = D.serie.find(z => z.fecha === CAL[i]); if (!x) return '';
   let h = '<b>' + fDiaL(x.fecha) + '</b>';
   if (x.sinCarga) h += '<div class="hint0">' + (x.libre ? 'Fin de semana sin carga' : 'Sin carga: no se tiró mezcla') + '</div>';
-  else h += fila('Toneladas', fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)')) + fila('Viajes de mezcla', x.viajes) +
+  else h += fila('Toneladas', fmtN(x.t,1) + ' t' + (x.jornada ? '' : ' (parada)') + (x.planta ? ' (según la planta)' : x.tPlanta != null ? ' · planta informó ' + fmtN(x.tPlanta,1) + ' t' : '')) + fila('Viajes de mezcla', x.viajes) +
     fila('Combustible', fmtUSD(x.comb) + (x.combFuente === 'manual' ? ' (manual)' : x.combFuente === 'real' ? ' (' + fmtN(x.litros,0) + ' l)' : x.combFuente === 'sin consumo' ? ' (sin carga)' : ' (est.)')) +
     fila('Flete', fmtUSD(x.flete)) + fila('Puntas', fmtUSD(x.puntas));
   h += fila('Equipos' + eqN(x), fmtUSD(x.equiposDia)) + fila('Personal', fmtUSD(x.moDia)) + fila('Señalización', fmtUSD(x.senal || 0)) +
@@ -628,7 +632,8 @@ function preview() {
   let resto = t % D.cfg.CAP;
   let advFlete = (t > 0 && resto > 0 && resto <= 5 && vIn === '') ? '<br>⚠ Con ' + t + ' t pagás ' + viajes + ' viajes: el último lleva solo ' + fmtN(resto,1) + ' t.' : '';
   document.getElementById('prev').innerHTML =
-    (existe ? '<b>Ya hay carga para esta fecha (' + fmtN(existe.t,1) + ' t). Al guardar se reemplaza.</b><br>' : '') +
+    (existe && !existe.planta ? '<b>Ya hay carga para esta fecha (' + fmtN(existe.t,1) + ' t). Al guardar se reemplaza.</b><br>' : '') +
+    (existe && existe.tPlanta != null ? 'La planta informó <b>' + fmtN(existe.tPlanta,1) + ' t</b> de mezcla para Autovías este día' + (existe.planta ? ' (es lo que se está usando; cargar a mano lo reemplaza).' : '.') + '<br>' : '') +
     'Costo estimado del día: <b>' + fmtUSD(costo) + '</b> · ' + fmtUSD2(t > 0 ? costo/t : null) + '/t<br>' +
     'Facturación: <b>' + fmtUSD(fact) + '</b> · Utilidad: <b class="' + (u>=0?'pos':'neg') + '">' + fmtUSD(u) + '</b>' +
     '<br><span class="small">' + (cIn !== '' ? 'Combustible cargado a mano.' : (D.cfg.COMB_DESDE && fIn >= D.cfg.COMB_DESDE ? 'Combustible: el que registren Leandro (equipos) y Tiburcio (camionetas) para este día; sin registro = sin consumo.' : 'Combustible estimado (día anterior al registro de Leandro).')) + '</span>' + advFlete;

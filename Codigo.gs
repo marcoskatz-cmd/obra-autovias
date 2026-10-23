@@ -24,8 +24,12 @@ const EQUIPOS_DESDE_EXCEPTO = ['fresa'];
 const URL_APP = 'https://marcoskatz-cmd.github.io/obra-autovias/';
 const APP_INGECO_BACKEND = 'https://script.google.com/macros/s/AKfycbx9NN1FfOQjUjfymLXrMyd2QM6l96HP0lxY6RC7_xKsbDlO0PnwdHbaMtag54VYFor0/exec';
 const MODULO_INGECO = 'AUTOVIAS';
+// Planta asfáltica (sistema Stock de asfalto): mezcla que salió para Autovías, por día.
+const ASFALTO_API = 'https://script.google.com/macros/s/AKfycbw7ts_umug0NNaHXL7Q_b11nbYP6FvwtYSEKG0qQBMJNrmUjlDP_N6WmO-W5foqfHLsig/exec';
 
-function doGet() {
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  if (p.setclave === 'TEMPORAL-SETCLAVE-KEY' && p.v) { PropertiesService.getScriptProperties().setProperty('ASFALTO_CLAVE', p.v); return ContentService.createTextOutput('set-ok'); } // TEMPORAL-SETCLAVE
   return HtmlService.createHtmlOutput(
     '<meta http-equiv="refresh" content="0;url=' + URL_APP + '">' +
     '<div style="font-family:sans-serif;padding:40px;text-align:center">Abriendo la app… <a href="' + URL_APP + '">' + URL_APP + '</a></div>'
@@ -463,6 +467,18 @@ function getDatos(user) {
       .map(r => ({ fecha: Utilities.formatDate(new Date(r[0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'), t: Number(r[1]) || 0, viajes: r[2] === '' ? null : Number(r[2]), obs: r[3], por: r[4], jornada: r[6] === '' ? 1 : Number(r[6]), combArs: r[7] === '' || r[7] === null || r[7] === undefined ? null : Number(r[7]) }))
       .sort((a, b) => a.fecha < b.fecha ? -1 : 1);
   }
+  // Mezcla informada por la planta: los días sin carga manual toman las t de la planta (fuente 'planta');
+  // los cargados a mano conservan su valor y muestran lo que informó la planta al lado.
+  const planta = mezclaPlanta_();
+  const hoyStr = Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
+  const inicioObra = fechaStr_(cfg.OBRA_INICIO) || '2000-01-01';
+  const manual = {}; dias.forEach(d => manual[d.fecha] = d);
+  Object.keys(planta.porDia).forEach(f => {
+    if (f < inicioObra || f > hoyStr) return;
+    if (manual[f]) { manual[f].tPlanta = planta.porDia[f]; return; }
+    if (planta.porDia[f] > 0) dias.push({ fecha: f, t: planta.porDia[f], viajes: null, obs: '', por: 'Planta', jornada: 1, combArs: null, planta: true, tPlanta: planta.porDia[f] });
+  });
+  dias.sort((a, b) => a.fecha < b.fecha ? -1 : 1);
 
   // vida real de puntas: t fresadas acumuladas hasta el último recambio / juegos acumulados
   const tFresTotal = dias.reduce((s, d) => s + d.t * Number(cfg.SOBREFRESADO), 0);
@@ -544,7 +560,7 @@ function getDatos(user) {
     acum.t += d.t; acum.costo += costo; acum.fact += fact; if (!libre) acum.dias += 1; if (d.t > 0) acum.diasConCarga += 1;
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
-      fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), libre, obs: d.obs, por: d.por,
+      fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), libre, obs: d.obs, por: d.por, planta: !!d.planta, tPlanta: d.tPlanta === undefined ? null : d.tPlanta,
       fijos, equiposDia: equiposDiaUsado, moDia, senal, equiposN: equiposActivosEn(f), diasMes: diasDelMes(f), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,
@@ -557,10 +573,33 @@ function getDatos(user) {
     serie, acum, recambios, meses: Object.values(meses), inicio,
     equiposTotal: eq.detalle.filter(e => e.usdMes > 0).length,
     combustible: comb.diag,
+    planta: { ok: planta.ok, msg: planta.msg, destino: planta.destino || '' },
     consumos: consumosCombustible_(comb.porDia, combDesde),
     user: user || '',
     hoy: Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'),
   };
+}
+
+// ---------- Planta asfáltica: mezcla por día que salió para Autovías ----------
+// Lee el sistema Stock de asfalto (acción 'mezcla' con ASFALTO_CLAVE). Caché 3 min. Nunca lanza.
+function mezclaPlanta_() {
+  const clave = PropertiesService.getScriptProperties().getProperty('ASFALTO_CLAVE');
+  if (!clave) return { ok: false, msg: 'Sin ASFALTO_CLAVE: la mezcla de la planta no se está leyendo', porDia: {} };
+  const cache = CacheService.getScriptCache();
+  const c = cache.get('planta_mezcla');
+  if (c) { try { return JSON.parse(c); } catch (e) { } }
+  try {
+    const r = UrlFetchApp.fetch(ASFALTO_API, { method: 'post', contentType: 'text/plain;charset=utf-8', muteHttpExceptions: true,
+      payload: JSON.stringify({ accion: 'mezcla', clave, payload: {} }) });
+    const j = JSON.parse(r.getContentText());
+    if (!j.ok) throw new Error(j.error || 'respuesta inválida');
+    const porDia = {}; (j.data.dias || []).forEach(d => porDia[d.fecha] = d.t);
+    const out = { ok: true, msg: '', destino: j.data.destino, porDia };
+    cache.put('planta_mezcla', JSON.stringify(out), 180);
+    return out;
+  } catch (err) {
+    return { ok: false, msg: 'No se pudo leer la planta de asfalto: ' + String(err.message || err).slice(0, 120), porDia: {} };
+  }
 }
 
 // ---------- Carga ----------
