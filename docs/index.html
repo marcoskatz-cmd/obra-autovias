@@ -306,7 +306,7 @@ function render() {
     ['Utilidad promedio/día', fmtUSD(utilProm), 'en ' + a.dias + ' días', utilProm != null ? (utilProm >= 0 ? 'ok' : 'mal') : ''],
     ['Toneladas promedio/día', fmtN(a.diasConCarga ? a.t / a.diasConCarga : null,1), 'en ' + a.diasConCarga + ' días con carga · ' + fmtN(tProm,1) + ' t por día de obra', ''],
     ['Margen sobre facturación', margen == null ? '—' : fmtN(margen*100,1) + '%', 'facturado ' + fmtUSD(a.fact), margen != null ? (margen >= 0.1 ? 'ok' : margen >= 0 ? '' : 'mal') : ''],
-    ['Punto de equilibrio (mín. t/día)', fmtN((D.base.fijoDia + D.base.combEstUSD) / (D.cfg.PRECIO_T - D.base.puntasPorT - D.base.fleteUSD / D.cfg.CAP),0) + ' t/día', 'mínimo a tirar por día para no perder plata (cubre equipos, personal, gasoil, flete y puntas)', ''],
+    ['Punto de equilibrio (mín. t/día)', (t => t ? t + ' t/día' : '> 300 t/día')((() => { const b = D.base, P = D.cfg.PRECIO_T; for (let t = 1; t <= 300; t++) if (t * P - (b.fijoDia + b.combEstUSD + Math.ceil(t / D.cfg.CAP) * b.fleteUSD + t * b.puntasPorT) >= 0) return t; })()), 'mínimo a tirar por día para no perder plata (cubre equipos, personal, gasoil, flete y puntas)', ''],
     ['Costo fijo diario', fmtUSD(D.base.fijoDia + D.base.combEstUSD), 'equipos + MO + señal. + comb. est.', ''],
   ];
   document.getElementById('kpis').innerHTML = k.map(x => '<div class="kpi ' + x[3] + (x[4] ? ' ' + x[4] : '') + '"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
