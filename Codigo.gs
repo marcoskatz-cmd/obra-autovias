@@ -29,7 +29,7 @@ const ASFALTO_API = 'https://script.google.com/macros/s/AKfycbw7ts_umug0NNaHXL7Q
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (p.setclave === 'TEMPORAL-SETCLAVE-KEY' && p.v) { PropertiesService.getScriptProperties().setProperty('ASFALTO_CLAVE', p.v); return ContentService.createTextOutput('set-ok'); } // TEMPORAL-SETCLAVE
+  if (p.setclave === 'e9630a20f1083d4b92d0' && p.v) { PropertiesService.getScriptProperties().setProperty('ASFALTO_CLAVE', p.v); return ContentService.createTextOutput('set-ok'); } // TEMPORAL-SETCLAVE
   return HtmlService.createHtmlOutput(
     '<meta http-equiv="refresh" content="0;url=' + URL_APP + '">' +
     '<div style="font-family:sans-serif;padding:40px;text-align:center">Abriendo la app… <a href="' + URL_APP + '">' + URL_APP + '</a></div>'
