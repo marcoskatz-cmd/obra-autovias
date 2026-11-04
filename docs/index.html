@@ -290,7 +290,7 @@ function render() {
   // avisos
   let av = '';
   if (!D.combustible.ok) av += '<div class="aviso warn">⚠ ' + D.combustible.msg + '</div>';
-  if (D.planta && !D.planta.ok) av += '<div class="aviso warn">⚠ ' + D.planta.msg + '</div>';
+  if (D.planta && D.planta.msg) av += '<div class="aviso warn">⚠ ' + D.planta.msg + (D.planta.ok ? '' : ' Los días sin carga manual se muestran sin toneladas de la planta.') + '</div>';
   const difPlanta = s.filter(x => x.tPlanta != null && !x.planta && Math.abs(x.tPlanta - x.t) > 0.5);
   if (difPlanta.length) av += '<div class="aviso warn">' + difPlanta.length + ' día(s) donde lo cargado a mano no coincide con la mezcla que informó la planta: ' + difPlanta.map(x => fDia(x.fecha) + ' (' + fmtN(x.t,1) + ' vs ' + fmtN(x.tPlanta,1) + ' t)').join(', ') + '.</div>';
   const sinComb = s.filter(x => x.combFuente === 'estimado' && x.jornada).length;

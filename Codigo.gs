@@ -469,9 +469,9 @@ function getDatos(user) {
   }
   // Mezcla informada por la planta: los días sin carga manual toman las t de la planta (fuente 'planta');
   // los cargados a mano conservan su valor y muestran lo que informó la planta al lado.
-  const planta = mezclaPlanta_();
   const hoyStr = Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
   const inicioObra = fechaStr_(cfg.OBRA_INICIO) || '2000-01-01';
+  const planta = mezclaPlanta_(inicioObra);
   const manual = {}; dias.forEach(d => manual[d.fecha] = d);
   Object.keys(planta.porDia).forEach(f => {
     if (f < inicioObra || f > hoyStr) return;
@@ -582,20 +582,25 @@ function getDatos(user) {
 
 // ---------- Planta asfáltica: mezcla por día que salió para Autovías ----------
 // Lee el sistema Stock de asfalto (acción 'mezcla' con ASFALTO_CLAVE). Caché 3 min. Nunca lanza.
-function mezclaPlanta_() {
+// ok=true con msg: la planta respondió pero hay algo para revisar (sin días para el destino, nombre distinto…).
+function mezclaPlanta_(desde) {
   const clave = PropertiesService.getScriptProperties().getProperty('ASFALTO_CLAVE');
   if (!clave) return { ok: false, msg: 'Sin ASFALTO_CLAVE: la mezcla de la planta no se está leyendo', porDia: {} };
   const cache = CacheService.getScriptCache();
-  const c = cache.get('planta_mezcla');
+  const k = 'planta_mezcla_' + (desde || '');
+  const c = cache.get(k);
   if (c) { try { return JSON.parse(c); } catch (e) { } }
   try {
     const r = UrlFetchApp.fetch(ASFALTO_API, { method: 'post', contentType: 'text/plain;charset=utf-8', muteHttpExceptions: true,
-      payload: JSON.stringify({ accion: 'mezcla', clave, payload: {} }) });
+      payload: JSON.stringify({ accion: 'mezcla', clave, payload: desde ? { desde } : {} }) });
+    if (r.getResponseCode() >= 400) throw new Error('HTTP ' + r.getResponseCode());
     const j = JSON.parse(r.getContentText());
     if (!j.ok) throw new Error(j.error || 'respuesta inválida');
-    const porDia = {}; (j.data.dias || []).forEach(d => porDia[d.fecha] = d.t);
-    const out = { ok: true, msg: '', destino: j.data.destino, porDia };
-    cache.put('planta_mezcla', JSON.stringify(out), 180);
+    const porDia = {}; (j.data.dias || []).forEach(d => porDia[d.fecha] = Number(d.t) || 0);
+    let msg = String(j.data.aviso || '');
+    if (!msg && !Object.keys(porDia).length) msg = 'La planta de asfalto respondió pero no tiene mezcla cargada para "' + (j.data.destino || '?') + '"' + (j.data.destinos && j.data.destinos.length ? ' (destinos con mezcla: ' + j.data.destinos.join(', ') + ')' : '') + '.';
+    const out = { ok: true, msg, destino: j.data.destino, porDia };
+    cache.put(k, JSON.stringify(out), 180);
     return out;
   } catch (err) {
     return { ok: false, msg: 'No se pudo leer la planta de asfalto: ' + String(err.message || err).slice(0, 120), porDia: {} };
