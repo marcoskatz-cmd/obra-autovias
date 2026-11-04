@@ -50,6 +50,7 @@ function doPost(e) {
       case 'datos': data = getDatos(user); break;
       case 'guardarDia': data = guardarDia(p, user); break;
       case 'guardarPuntas': data = guardarPuntas(p, user); break;
+      case 'borrarPuntas': data = borrarPuntas(p, user); break;
       case 'borrarDia': data = borrarDia(p.fecha, user); break;
       case 'obras': data = obrasCombustible_(); break;
       case 'diagCamionetas': data = diagCamionetas_(p.desde || '2026-10-10'); break;
@@ -137,8 +138,8 @@ function setup() {
     ['MO_MES_USD', 15510, 'USD/mes mano de obra (desde MO_MES_DESDE): se divide por los días del mes y corre todos los días, findes incluidos'],
     ['MO_MES_DESDE', '2026-10-13', 'Desde qué fecha la gente se paga mensual. Antes: MO_USD por día trabajado'],
     ['SENAL_MES_USD', 7326, 'USD/mes señalización: se divide por los días del mes y corre todos los días, findes incluidos'],
-    ['PUNTAS_JUEGO_ARS', 6134000, '$ juego de 200 puntas CON IVA'],
-    ['PUNTAS_VIDA_T', 1400, 't fresadas por juego = 200 puntas × 7 t/punta (estimado; se recalcula con recambios reales)'],
+    ['PUNTAS_PRECIO_ARS', 17930, '$ por punta CON IVA (200 puntas = $ 3.586.000)'],
+    ['PUNTAS_VIDA_T', 7, 't fresadas por punta (estimado; con recambios cargados se usa la vida real)'],
   ];
   cfg.getRange(2, 1, rows.length, 3).setValues(rows);
   cfg.setColumnWidths(1, 1, 180); cfg.setColumnWidth(2, 320); cfg.setColumnWidth(3, 420);
@@ -170,7 +171,7 @@ function setup() {
 
   let pun = ss.getSheetByName(TABS.PUNTAS) || ss.insertSheet(TABS.PUNTAS);
   if (pun.getLastRow() === 0) {
-    pun.getRange(1, 1, 1, 5).setValues([['FECHA', 'JUEGOS', 'OBSERVACIONES', 'CARGADO POR', 'TIMESTAMP']]).setFontWeight('bold');
+    pun.getRange(1, 1, 1, 5).setValues([['FECHA', 'PUNTAS', 'OBSERVACIONES', 'CARGADO POR', 'TIMESTAMP']]).setFontWeight('bold');
     pun.setFrozenRows(1);
   }
 
@@ -244,7 +245,7 @@ function leerEquipos_() {
   }));
 }
 
-const CLAVES_NUM = ['TC', 'IVA', 'COMB_CON_IVA', 'DIAS_MES', 'PRECIO_T', 'SOBREFRESADO', 'CAP_CAMION', 'FLETE_ARS', 'COMB_ESTIMADO_ARS', 'MO_USD', 'MO_MES_USD', 'SENAL_USD', 'SENAL_MES_USD', 'PUNTAS_JUEGO_ARS', 'PUNTAS_VIDA_T'];
+const CLAVES_NUM = ['TC', 'IVA', 'COMB_CON_IVA', 'DIAS_MES', 'PRECIO_T', 'SOBREFRESADO', 'CAP_CAMION', 'FLETE_ARS', 'COMB_ESTIMADO_ARS', 'MO_USD', 'MO_MES_USD', 'SENAL_USD', 'SENAL_MES_USD', 'PUNTAS_JUEGO_ARS', 'PUNTAS_PRECIO_ARS', 'PUNTAS_VIDA_T'];
 
 function guardarConfig(p, user) {
   if (!user) throw new Error('Sin permiso');
@@ -446,7 +447,9 @@ function getDatos(user) {
   const fijoDia = eq.dia + Number(cfg.MO_MES_USD) / 30 + Number(cfg.SENAL_MES_USD) / 30;
   const fleteUSD = Number(cfg.FLETE_ARS) / TC;
   const combEstUSD = Number(cfg.COMB_ESTIMADO_ARS) / TC;
-  const puntasJuegoUSD = Number(cfg.PUNTAS_JUEGO_ARS) / (1 + IVA) / TC;
+  // precio por punta (con IVA). Planillas viejas: precio del juego de 200.
+  const puntaARS = Number(cfg.PUNTAS_PRECIO_ARS) > 0 ? Number(cfg.PUNTAS_PRECIO_ARS) : Number(cfg.PUNTAS_JUEGO_ARS) / 200;
+  const puntaUSD = puntaARS / (1 + IVA) / TC;
   const comb = combustiblePorDia_(cfg);
   const combDiv = Number(cfg.COMB_CON_IVA) === 1 ? (1 + IVA) : 1;
   const combDesde = cfg.COMB_DESDE ? (cfg.COMB_DESDE instanceof Date ? Utilities.formatDate(cfg.COMB_DESDE, 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : String(cfg.COMB_DESDE).trim()) : '';
@@ -456,8 +459,10 @@ function getDatos(user) {
   const shP = ss.getSheetByName(TABS.PUNTAS);
   let recambios = [];
   if (shP && shP.getLastRow() > 1) {
+    migrarPuntas_(shP);
     recambios = shP.getRange(2, 1, shP.getLastRow() - 1, 3).getValues()
-      .filter(r => r[0]).map(r => ({ fecha: Utilities.formatDate(new Date(r[0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'), juegos: Number(r[1]) || 0, obs: r[2] }));
+      .map((r, i) => ({ fila: i + 2, fecha: r[0] ? Utilities.formatDate(new Date(r[0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : '', puntas: Number(r[1]) || 0, obs: r[2] }))
+      .filter(r => r.fecha);
   }
 
   const shD = ss.getSheetByName(TABS.PROD);
@@ -480,16 +485,15 @@ function getDatos(user) {
   });
   dias.sort((a, b) => a.fecha < b.fecha ? -1 : 1);
 
-  // vida real de puntas: t fresadas acumuladas hasta el último recambio / juegos acumulados
-  const tFresTotal = dias.reduce((s, d) => s + d.t * Number(cfg.SOBREFRESADO), 0);
-  const juegosTotal = recambios.reduce((s, r) => s + r.juegos, 0);
+  // vida real de puntas: t fresadas acumuladas hasta el último recambio / puntas cambiadas (cada punta cambiada se gastó)
+  const puntasTotal = recambios.reduce((s, r) => s + r.puntas, 0);
   let vidaPuntas = Number(cfg.PUNTAS_VIDA_T), vidaReal = false;
-  if (juegosTotal >= 2) {
+  if (puntasTotal > 0) {
     const ultimo = recambios.map(r => r.fecha).sort().pop();
     const tHasta = dias.filter(d => d.fecha <= ultimo).reduce((s, d) => s + d.t * Number(cfg.SOBREFRESADO), 0);
-    if (tHasta > 0) { vidaPuntas = tHasta / (juegosTotal - 1); vidaReal = true; }
+    if (tHasta > 0) { vidaPuntas = tHasta / puntasTotal; vidaReal = true; }
   }
-  const puntasPorT = puntasJuegoUSD / vidaPuntas * Number(cfg.SOBREFRESADO);
+  const puntasPorT = puntaUSD / vidaPuntas * Number(cfg.SOBREFRESADO);
 
   // ---- Calendario de obra: los fijos (alquileres, personal, señalización) corren TODOS los días hábiles
   //      desde el inicio de la obra, se tire mezcla o no. Combustible, flete y puntas solo cuando hay producción.
@@ -569,7 +573,7 @@ function getDatos(user) {
 
   return {
     cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE, COMB_DESDE: combDesde, CAMIONETAS: String(cfg.COMB_CAMIONETAS || '') },
-    base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_MES_USD) / 30, moMes: Number(cfg.MO_MES_USD), moJornada: Number(cfg.MO_USD), moDesde: fechaStr_(cfg.MO_MES_DESDE), senalDia: Number(cfg.SENAL_MES_USD) / 30, senalMes: Number(cfg.SENAL_MES_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, vidaPuntas, vidaReal, equipos: eq.detalle },
+    base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_MES_USD) / 30, moMes: Number(cfg.MO_MES_USD), moJornada: Number(cfg.MO_USD), moDesde: fechaStr_(cfg.MO_MES_DESDE), senalDia: Number(cfg.SENAL_MES_USD) / 30, senalMes: Number(cfg.SENAL_MES_USD), fijoDia, fleteUSD, combEstUSD, puntasPorT, puntaUSD, puntaARS, vidaPuntas, vidaReal, puntasTotal, equipos: eq.detalle },
     serie, acum, recambios, meses: Object.values(meses), inicio,
     equiposTotal: eq.detalle.filter(e => e.usdMes > 0).length,
     combustible: comb.diag,
@@ -679,11 +683,35 @@ function guardarPuntas(p, user) {
   if (!user) throw new Error('Sin permiso');
   const fecha = String(p.fecha || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error('Fecha inválida');
-  const juegos = Number(p.juegos);
-  if (!(juegos > 0 && juegos <= 10)) throw new Error('Cantidad de juegos inválida');
-  SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.PUNTAS)
-    .appendRow([new Date(fecha + 'T12:00:00'), juegos, String(p.obs || '').slice(0, 300), user, new Date()]);
+  const puntas = Number(p.puntas);
+  if (!(puntas > 0 && puntas <= 2000 && puntas === Math.round(puntas))) throw new Error('Cantidad de puntas inválida');
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.PUNTAS);
+  migrarPuntas_(sh);
+  sh.appendRow([new Date(fecha + 'T12:00:00'), puntas, String(p.obs || '').slice(0, 300), user, new Date()]);
   return { ok: true };
+}
+
+function borrarPuntas(p, user) {
+  if (!user) throw new Error('Sin permiso');
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.PUNTAS);
+  const fila = Number(p.fila);
+  if (!(fila >= 2 && fila <= sh.getLastRow())) throw new Error('Recambio inexistente');
+  const r = sh.getRange(fila, 1, 1, 2).getValues()[0];
+  const fecha = r[0] ? Utilities.formatDate(new Date(r[0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : '';
+  if (fecha !== String(p.fecha || '') || Number(r[1]) !== Number(p.puntas)) throw new Error('El recambio cambió, recargá la app');
+  sh.deleteRow(fila);
+  return { ok: true };
+}
+
+// Planillas viejas tenían JUEGOS (de 200 puntas): pasa la columna a cantidad de puntas una sola vez.
+function migrarPuntas_(sh) {
+  if (String(sh.getRange(1, 2).getValue()).trim().toUpperCase() !== 'JUEGOS') return;
+  const n = sh.getLastRow() - 1;
+  if (n > 0) {
+    const v = sh.getRange(2, 2, n, 1).getValues().map(r => [r[0] === '' ? '' : Math.round(Number(r[0]) * 200)]);
+    sh.getRange(2, 2, n, 1).setValues(v);
+  }
+  sh.getRange(1, 2).setValue('PUNTAS');
 }
 
 function borrarDia(fecha, user) {

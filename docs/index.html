@@ -160,9 +160,9 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--tinta)}dd{margi
   </div>
   <div class="card">
     <h3>Recambio de puntas de fresadora</h3>
-    <div class="hint">Cargá cada vez que se compra/instala un juego. Con dos o más recambios, la vida útil real reemplaza al estimado.</div>
-    <div class="row"><div><label>Fecha</label><input type="date" id="pFecha"></div><div><label>Juegos</label><input type="number" id="pJ" inputmode="numeric" min="1" max="10" step="1" value="1"></div></div>
-    <label>Observaciones</label><input type="text" id="pObs" placeholder="Ej: cambio completo, 200 puntas">
+    <div class="hint">Cargá cada vez que se cambian puntas, con la cantidad cambiada. Con recambios cargados, la vida útil real (t fresadas por punta) reemplaza al estimado.</div>
+    <div class="row"><div><label>Fecha</label><input type="date" id="pFecha"></div><div><label>Puntas cambiadas</label><input type="number" id="pJ" inputmode="numeric" min="1" max="2000" step="1" placeholder="Ej: 100"></div></div>
+    <label>Observaciones</label><input type="text" id="pObs" placeholder="Ej: cambio completo">
     <button class="btn sec2" onclick="guardarPuntas()">Registrar recambio</button>
   </div>
 </section>
@@ -201,7 +201,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--tinta)}dd{margi
       <dt>Mezcla desde la planta</dt><dd>Los días que nadie carga a mano toman las toneladas que el plantista cargó para "Autovías" en el sistema <b>Stock de asfalto</b> (etiqueta <span class="tag">planta</span>). Si cargás el día a mano, vale lo tuyo y se avisa si no coincide con la planta.</dd>
       <dt>Viajes de mezcla</dt><dd>Se calculan solos (1 viaje cada 30 t, redondeando para arriba). Si el fletero facturó otra cantidad, corregilo en el campo.</dd>
       <dt>Combustible</dt><dd>Prioridad: el monto cargado a mano en el día (<span class="tag">manual</span>); si no, las planillas de entregas: la de Leandro Casares filtrada por la obra (equipos) más la de Tiburcio Sanz filtrada por operario o código (camionetas), ambas en <span class="tag">litros</span>. Desde la fecha en que Leandro empezó a registrar (Costos › Desde) un día sin carga es un día <span class="tag">sin consumo</span>. El estimado de Costos (<span class="tag est">est.</span>) solo se usa para los días anteriores a esa fecha.</dd>
-      <dt>Puntas</dt><dd>Registrá cada recambio de juego. Hasta tener dos recambios se usa la vida estimada de CONFIG.</dd>
+      <dt>Puntas</dt><dd>Registrá cada recambio con la cantidad de puntas cambiadas. Hasta tener recambios se usa la vida estimada (t por punta) de Costos.</dd>
       <dt>Costos fijos</dt><dd>Equipos alquilados, personal y señalización se pagan se tire o no: corren todos los días hábiles desde el inicio de la obra (fecha en Costos). Cada equipo puede tener su propia fecha "cuenta desde" (en Autovías todo menos la fresadora arrancó a contar el martes 13/10; los días previos fueron sin costo). Los días sin carga aparecen en los gráficos y en la tabla con su costo fijo. Combustible, flete y puntas solo se imputan cuando hay producción.</dd>
       <dt>Alquileres mensuales</dt><dd>Mientras el mes está en curso se prorratean por los días laborables de Costos. Cuando el mes termina, se recalculan dividiendo por los días hábiles de obra que tuvo ese mes.</dd>
       <dt>Precios y parámetros</dt><dd>Pestaña <b>Costos</b>: tipo de cambio, precio pactado, flete, combustible estimado, personal, puntas, PIN y la lista de equipos alquilados. Todo recalcula al guardar.</dd>
@@ -332,7 +332,7 @@ function render() {
     ['Costo fijo por día', fmtUSD(b.fijoDia + b.combEstUSD), 'equipos + personal + señal. + gasoil est.'],
     ['Precio pactado', fmtUSD2(D.cfg.PRECIO_T) + '/t', 'sin IVA · TC $ ' + fmtN(D.cfg.TC,0)],
     ['Flete por viaje', fmtUSD(b.fleteUSD), 'camión de ' + D.cfg.CAP + ' t'],
-    ['Puntas por t', fmtUSD2(b.puntasPorT), 'vida ' + fmtN(b.vidaPuntas,0) + ' t/juego' + (b.vidaReal ? ' (real)' : ' (est.)')],
+    ['Puntas por t', fmtUSD2(b.puntasPorT), 'vida ' + fmtN(b.vidaPuntas,1) + ' t/punta' + (b.vidaReal ? ' (real)' : ' (est.)')],
   ].map(x => '<div class="kpi"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
   document.getElementById('baseCostos').innerHTML = '<table>' +
     '<tr class="sec"><td>Equipos alquilados</td><td class="n">por mes</td><td class="n">por día</td></tr>' +
@@ -353,7 +353,7 @@ function render() {
   // tablas
   document.getElementById('tDias').innerHTML = '<tr><th>Fecha</th><th class="n">t</th><th class="n">Viajes</th><th class="n">Comb.</th><th class="n">Costo</th><th class="n">Costo/t</th><th class="n">Prom. obra</th><th class="n">Utilidad</th><th class="n">Acum.</th><th>Obs</th><th></th></tr>' +
     [...s].reverse().map(x => '<tr' + (x.sinCarga ? ' style="opacity:.65"' : '') + '><td>' + fDiaL(x.fecha) + (x.libre ? '<span class="tag">finde</span>' : x.sinCarga ? '<span class="tag est">sin carga</span>' : x.jornada ? '' : '<span class="tag">parada</span>') + '</td><td class="n">' + fmtN(x.t,1) + (x.planta ? '<span class="tag">planta</span>' : (x.tPlanta != null && Math.abs(x.tPlanta - x.t) > 0.5 ? '<span class="tag est">planta ' + fmtN(x.tPlanta,1) + '</span>' : '')) + '</td><td class="n">' + x.viajes + '</td><td class="n">' + fmtUSD(x.comb) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : x.combFuente === 'real' ? '<span class="tag">' + fmtN(x.litros,0) + ' l</span>' : x.combFuente === 'sin consumo' ? '<span class="tag">sin consumo</span>' : '<span class="tag est">est.</span>') + '</td><td class="n">' + fmtUSD(x.costo) + '</td><td class="n">' + fmtUSD2(x.costoT) + '</td><td class="n">' + fmtUSD2(x.acumCostoT) + '</td><td class="n ' + (x.utilidad >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.utilidad) + '</td><td class="n ' + (x.acumUtil >= 0 ? 'pos' : 'neg') + '">' + fmtUSD(x.acumUtil) + '</td><td class="small">' + (x.obs || '') + '</td><td><button class="editar" onclick="editar(\'' + x.fecha + '\')">editar</button></td></tr>').join('');
-  document.getElementById('tPuntas').innerHTML = '<tr><th>Fecha</th><th class="n">Juegos</th><th>Obs</th></tr>' + (D.recambios.length ? D.recambios.map(r => '<tr><td>' + fDiaL(r.fecha) + '</td><td class="n">' + r.juegos + '</td><td>' + (r.obs||'') + '</td></tr>').join('') : '<tr><td colspan="3" class="small">Sin recambios registrados.</td></tr>');
+  document.getElementById('tPuntas').innerHTML = '<tr><th>Fecha</th><th class="n">Puntas</th><th>Obs</th><th></th></tr>' + (D.recambios.length ? D.recambios.map(r => '<tr><td>' + fDiaL(r.fecha) + '</td><td class="n">' + r.puntas + '</td><td>' + (r.obs||'') + '</td><td><button class="editar" onclick="borrarPuntas(' + r.fila + ',\'' + r.fecha + '\',' + r.puntas + ')">borrar</button></td></tr>').join('') + '<tr><td class="small" colspan="4">Total: ' + D.recambios.reduce((s, r) => s + r.puntas, 0) + ' puntas cambiadas</td></tr>' : '<tr><td colspan="4" class="small">Sin recambios registrados.</td></tr>');
 
   // charts: un gráfico por tarjeta, con pestañas
   const tDia = CAL.map(f => porFecha[f] ? porFecha[f].t : 0);
@@ -421,8 +421,8 @@ const CFG_CAMPOS = [
   ['Personal', 'MO_MES_DESDE', 'Desde qué fecha la gente se paga mensual (AAAA-MM-DD)', 'text'],
   ['Personal', 'MO_USD', 'Mano de obra por día trabajado (USD), antes de la fecha mensual', 'decimal'],
   ['Personal', 'SENAL_MES_USD', 'Señalización por MES (USD): se divide por los días del mes y corre todos los días, findes incluidos', 'decimal'],
-  ['Puntas de fresadora', 'PUNTAS_JUEGO_ARS', 'Precio del juego de 200 puntas ($, con IVA)', 'numeric'],
-  ['Puntas de fresadora', 'PUNTAS_VIDA_T', 't fresadas por juego (estimado hasta tener recambios)', 'numeric'],
+  ['Puntas de fresadora', 'PUNTAS_PRECIO_ARS', 'Precio por punta ($ finales, con IVA)', 'decimal'],
+  ['Puntas de fresadora', 'PUNTAS_VIDA_T', 't fresadas por punta (estimado hasta tener recambios)', 'decimal'],
   ['Acceso', 'PIN', 'PIN de la app', 'text'],
 ];
 let CFG = null, EQ = [], EQ0 = '[]';
@@ -454,7 +454,7 @@ function renderCriterios() {
     ]) +
     g('Costos variables (solo los días con producción)', [
       '<b>Flete de mezcla</b>: ' + ars(k('FLETE_ARS', b.fleteUSD * D.cfg.TC)) + ' por viaje entero sin IVA (' + fmtUSD(b.fleteUSD) + '). Se usan los viajes cargados en el día; si no se cargaron, se calcula t ÷ ' + D.cfg.CAP + ' t por camión, redondeado para arriba.',
-      '<b>Puntas de fresadora</b>: juego de 200 puntas a ' + ars(k('PUNTAS_JUEGO_ARS', 0)) + ' con IVA. Por cada t colocada se fresan ' + k('SOBREFRESADO', '') + ' t. Vida del juego: ' + fmtN(b.vidaPuntas, 0) + ' t fresadas' + (b.vidaReal ? ' (real, calculada con los recambios cargados).' : ' (estimada; con 2 o más recambios cargados se recalcula con la vida real).') + ' Resultado: ' + fmtUSD2(b.puntasPorT) + ' por t colocada.',
+      '<b>Puntas de fresadora</b>: ' + ars(b.puntaARS) + ' por punta con IVA. Por cada t colocada se fresan ' + k('SOBREFRESADO', '') + ' t. Vida: ' + fmtN(b.vidaPuntas, 1) + ' t fresadas por punta' + (b.vidaReal ? ' (real: t fresadas hasta el último recambio ÷ ' + b.puntasTotal + ' puntas cambiadas).' : ' (estimada; con recambios cargados se recalcula con la vida real).') + ' Resultado: ' + fmtUSD2(b.puntasPorT) + ' por t colocada.',
     ]) +
     g('Combustible', [
       'Prioridad para cada día: <b>1)</b> el monto cargado a mano en "Cargar día"; <b>2)</b> lo real de las planillas de combustible; <b>3)</b> antes del ' + fDia(D.cfg.COMB_DESDE) + ', un estimado de ' + ars(k('COMB_ESTIMADO_ARS', b.combEstUSD * D.cfg.TC)) + ' por día trabajado.',
@@ -653,10 +653,15 @@ function guardar() {
   }).catch(e => { b.disabled = false; b.textContent = 'Guardar día'; toast(e.message, 'mal'); });
 }
 function guardarPuntas() {
-  const fecha = document.getElementById('pFecha').value, juegos = document.getElementById('pJ').value;
-  if (!fecha || !juegos) return toast('Completá fecha y cantidad', 'mal');
-  api('guardarPuntas', { fecha, juegos, obs: document.getElementById('pObs').value }, true)
-    .then(r => { toast('Recambio registrado', 'ok'); document.getElementById('pObs').value = ''; if (r && r.all) aplicarDatos(r.all); else cargar(); }).catch(e => toast(e.message, 'mal'));
+  const fecha = document.getElementById('pFecha').value, puntas = document.getElementById('pJ').value;
+  if (!fecha || !puntas) return toast('Completá fecha y cantidad de puntas', 'mal');
+  api('guardarPuntas', { fecha, puntas, obs: document.getElementById('pObs').value }, true)
+    .then(r => { toast('Recambio registrado', 'ok'); document.getElementById('pObs').value = ''; document.getElementById('pJ').value = ''; if (r && r.all) aplicarDatos(r.all); else cargar(); }).catch(e => toast(e.message, 'mal'));
+}
+function borrarPuntas(fila, fecha, puntas) {
+  if (!confirm('¿Borrar el recambio del ' + fDiaL(fecha) + ' (' + puntas + ' puntas)?')) return;
+  api('borrarPuntas', { fila, fecha, puntas }, true)
+    .then(r => { toast('Recambio borrado', 'ok'); if (r && r.all) aplicarDatos(r.all); else cargar(); }).catch(e => toast(e.message, 'mal'));
 }
 function editar(fecha) {
   const x = D.serie.find(s => s.fecha === fecha); if (!x) return;
