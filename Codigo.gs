@@ -29,7 +29,6 @@ const ASFALTO_API = 'https://script.google.com/macros/s/AKfycbw7ts_umug0NNaHXL7Q
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (p.setclave === 'e9630a20f1083d4b92d0' && p.v) { PropertiesService.getScriptProperties().setProperty('ASFALTO_CLAVE', p.v); return ContentService.createTextOutput('set-ok'); } // TEMPORAL-SETCLAVE
   return HtmlService.createHtmlOutput(
     '<meta http-equiv="refresh" content="0;url=' + URL_APP + '">' +
     '<div style="font-family:sans-serif;padding:40px;text-align:center">Abriendo la app… <a href="' + URL_APP + '">' + URL_APP + '</a></div>'
@@ -52,6 +51,7 @@ function doPost(e) {
       case 'guardarPuntas': data = guardarPuntas(p, user); break;
       case 'borrarPuntas': data = borrarPuntas(p, user); break;
       case 'borrarDia': data = borrarDia(p.fecha, user); break;
+      case 'espejarPlanta': data = espejarTodoEnPlanta_(user); break;
       case 'obras': data = obrasCombustible_(); break;
       case 'diagCamionetas': data = diagCamionetas_(p.desde || '2026-10-10'); break;
       case 'config': data = leerConfigCompleta_(); break;
@@ -600,7 +600,7 @@ function mezclaPlanta_(desde) {
     if (r.getResponseCode() >= 400) throw new Error('HTTP ' + r.getResponseCode());
     const j = JSON.parse(r.getContentText());
     if (!j.ok) throw new Error(j.error || 'respuesta inválida');
-    const porDia = {}; (j.data.dias || []).forEach(d => porDia[d.fecha] = Number(d.t) || 0);
+    const porDia = {}; (j.data.dias || []).forEach(d => { if (!d.espejo) porDia[d.fecha] = Number(d.t) || 0; });
     let msg = String(j.data.aviso || '');
     if (!msg && !Object.keys(porDia).length) msg = 'La planta de asfalto respondió pero no tiene mezcla cargada para "' + (j.data.destino || '?') + '"' + (j.data.destinos && j.data.destinos.length ? ' (destinos con mezcla: ' + j.data.destinos.join(', ') + ')' : '') + '.';
     const out = { ok: true, msg, destino: j.data.destino, porDia };
@@ -609,6 +609,35 @@ function mezclaPlanta_(desde) {
   } catch (err) {
     return { ok: false, msg: 'No se pudo leer la planta de asfalto: ' + String(err.message || err).slice(0, 120), porDia: {} };
   }
+}
+
+// ---------- Espejo en Stock de asfalto: lo que se carga acá y la planta no cargó ----------
+// Manda los días a la acción 'salidaExterna' de la planta: si el plantista ya cargó mezcla para Autovías ese día
+// no se toca; si no, queda registrada en SALIDAS como "Autovías · <quién>" (t = 0 la borra). Nunca lanza.
+function espejarEnPlanta_(dias, user) {
+  const clave = PropertiesService.getScriptProperties().getProperty('ASFALTO_CLAVE');
+  if (!clave) return { ok: false, error: 'Sin ASFALTO_CLAVE' };
+  try {
+    const r = UrlFetchApp.fetch(ASFALTO_API, { method: 'post', contentType: 'text/plain;charset=utf-8', muteHttpExceptions: true,
+      payload: JSON.stringify({ accion: 'salidaExterna', clave, payload: { dias, por: user || '' } }) });
+    const j = JSON.parse(r.getContentText());
+    if (!j.ok) throw new Error(j.error || 'respuesta inválida');
+    // la mezcla de la planta está en caché 3 min: se descarta para que el panel vea el cambio ya
+    const ini = fechaStr_(leerConfig_().OBRA_INICIO) || '2000-01-01';
+    CacheService.getScriptCache().remove('planta_mezcla_' + ini);
+    return { ok: true, dias: j.data.dias };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err).slice(0, 160) };
+  }
+}
+
+// Una vez (o cuando haga falta): manda a la planta todos los días cargados a mano en PRODUCCION.
+function espejarTodoEnPlanta_(user) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.PROD);
+  if (!sh || sh.getLastRow() < 2) return { ok: true, dias: [] };
+  const dias = sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().filter(r => r[0])
+    .map(r => ({ fecha: Utilities.formatDate(new Date(r[0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd'), t: Number(r[1]) || 0, por: String(r[4] || '') }));
+  return espejarEnPlanta_(dias, user);
 }
 
 // ---------- Carga ----------
@@ -637,9 +666,10 @@ function guardarDia(p, user) {
   if (sh.getLastColumn() < 8) sh.getRange(1, 8).setValue('COMBUSTIBLE_ARS').setFontWeight('bold');
   if (fila > 0) sh.getRange(fila, 1, 1, 8).setValues([row]);
   else sh.appendRow(row);
+  const planta = espejarEnPlanta_([{ fecha, t }], user);
   let aviso = null;
   try { aviso = avisarProduccion_(fecha, user); } catch (err) { aviso = { ok: false, error: String(err.message || err) }; }
-  return { ok: true, editado: fila > 0, aviso };
+  return { ok: true, editado: fila > 0, aviso, planta };
 }
 
 // ---------- Aviso por la app INGECO cuando se carga la producción del día ----------
@@ -720,7 +750,10 @@ function borrarDia(fecha, user) {
   const n = sh.getLastRow(); if (n < 2) return { ok: false };
   const fechas = sh.getRange(2, 1, n - 1, 1).getValues();
   for (let i = 0; i < fechas.length; i++) {
-    if (fechas[i][0] && Utilities.formatDate(new Date(fechas[i][0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') === fecha) { sh.deleteRow(i + 2); return { ok: true }; }
+    if (fechas[i][0] && Utilities.formatDate(new Date(fechas[i][0]), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') === fecha) {
+      sh.deleteRow(i + 2);
+      return { ok: true, planta: espejarEnPlanta_([{ fecha, t: 0 }], user) };   // saca la salida espejo de Stock, si la había
+    }
   }
   return { ok: false };
 }
