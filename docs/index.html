@@ -183,7 +183,7 @@ dl{font-size:13px}dt{font-weight:600;margin-top:10px;color:var(--tinta)}dd{margi
     <div class="hint">Tocá un grupo para abrirlo. Los cambios se aplican al guardar y recalculan todo el panel.</div>
     <div id="cfgForm"></div>
     <details class="grp" id="grpEq"><summary>Equipos alquilados <span class="small" id="eqCount"></span></summary>
-      <div class="hint">Precio mensual de cada equipo; los propios van en 0. Se divide por los días del mes calendario y corre todos los días, fines de semana incluidos. "Cuenta desde" es el primer día que se imputa ese alquiler (vacío = desde el inicio de obra); los días anteriores van sin costo.</div>
+      <div class="hint">Cada equipo se cobra <b>por mes</b> (se divide por los días del mes calendario y corre todos los días, fines de semana incluidos) o <b>por día trabajado</b> (solo los días con producción). Los propios van en 0. "Desde" y "hasta" marcan el primer y el último día que se imputa (vacío = desde el inicio de obra / sigue); fuera de ese rango, sin costo.</div>
       <div id="eqList"></div>
       <button class="btn sec2" onclick="agregarEquipo()">+ Agregar equipo</button>
     </details>
@@ -251,6 +251,9 @@ const fmtUSD2 = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-A
 const fmtN = (v, d=1) => v == null ? '—' : Number(v).toLocaleString('es-AR', {maximumFractionDigits:d});
 const fDia = s => { const [y,m,d] = s.split('-'); return d + '/' + m; };
 const fDiaL = s => { const [y,m,d] = s.split('-'); return d + '/' + m + '/' + y.slice(2); };
+// flete vigente en una fecha: FLETE_ARS desde el inicio, con cambios de precio (base.fletes)
+const fleteARSEn = (b, f) => { let v = b.fleteInicialARS != null ? b.fleteInicialARS : b.fleteUSD * D.cfg.TC; (b.fletes || []).forEach(c => { if (f >= c.desde) v = c.ars; }); return v; };
+const fleteHist = b => ['al inicio ' + fmtARS(b.fleteInicialARS)].concat((b.fletes || []).map(c => 'desde ' + fDia(c.desde) + ' ' + fmtARS(c.ars))).join(' · ');
 const eqN = x => (x.equiposN != null && D && D.equiposTotal && x.equiposN < D.equiposTotal) ? ', ' + x.equiposN + ' de ' + D.equiposTotal + ' equipos contando' : '';
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
@@ -336,15 +339,21 @@ function render() {
   ].map(x => '<div class="kpi"><div class="l">' + x[0] + '</div><div class="v">' + x[1] + '</div><div class="s">' + x[2] + '</div></div>').join('');
   document.getElementById('baseCostos').innerHTML = '<table>' +
     '<tr class="sec"><td>Equipos alquilados</td><td class="n">por mes</td><td class="n">por día</td></tr>' +
-    b.equipos.map(x => '<tr><td>' + x.equipo + (x.desde ? ' <span class="small">desde ' + fDia(x.desde) + '</span>' : '') + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes) : '<span class="small">propio</span>') + '</td><td class="n">' + (x.usdMes > 0 ? fmtUSD(x.usdMes / dm) : '') + '</td></tr>').join('') +
-    '<tr class="tot"><td>Equipos (÷ días del mes, findes incluidos)</td><td class="n">' + fmtUSD(b.equiposMes) + '</td><td class="n">' + fmtUSD(b.equiposDia) + '</td></tr>' +
+    b.equipos.map(x => {
+      const rango = (x.desde ? ' desde ' + fDia(x.desde) : '') + (x.hasta ? ' hasta ' + fDia(x.hasta) : '');
+      const porDia = x.cobro === 'DIA';
+      return '<tr' + (x.vigente === false ? ' style="opacity:.5"' : '') + '><td>' + x.equipo + (rango ? ' <span class="small">' + rango + '</span>' : '') + (x.vigente === false ? ' <span class="tag">ya no está</span>' : '') + '</td>' +
+        '<td class="n">' + (porDia ? '<span class="small">por día trabajado</span>' : x.usdMes > 0 ? fmtUSD(x.usdMes) : '<span class="small">propio</span>') + '</td>' +
+        '<td class="n">' + (porDia ? fmtUSD(x.usdDia) : x.usdMes > 0 ? fmtUSD(x.usdMes / dm) : '') + '</td></tr>';
+    }).join('') +
+    '<tr class="tot"><td>Equipos vigentes <span class="small">(mensuales ÷ días del mes' + (b.equiposPorJornada > 0 ? ' + por día trabajado' : '') + ')</span></td><td class="n">' + fmtUSD(b.equiposMes) + '</td><td class="n">' + fmtUSD(b.equiposDia) + '</td></tr>' +
     '<tr class="sec"><td>Otros fijos</td><td class="n">por mes</td><td class="n">por día</td></tr>' +
     '<tr><td>Mano de obra <span class="small">(mensual desde ' + fDia(b.moDesde) + '; antes ' + fmtUSD(b.moJornada) + ' por día trabajado)</span></td><td class="n">' + fmtUSD(b.moMes) + '</td><td class="n">' + fmtUSD(b.moDia) + '</td></tr>' +
     '<tr><td>Señalización</td><td class="n">' + fmtUSD(b.senalMes) + '</td><td class="n">' + fmtUSD(b.senalDia) + '</td></tr>' +
     '<tr><td>Gasoil estimado <span class="small">(si no hay dato real)</span></td><td></td><td class="n">' + fmtUSD(b.combEstUSD) + '</td></tr>' +
     '<tr class="tot"><td>Total fijo por día</td><td></td><td class="n">' + fmtUSD(b.fijoDia + b.combEstUSD) + '</td></tr>' +
     '<tr class="sec"><td>Variables</td><td></td><td></td></tr>' +
-    '<tr><td>Flete por viaje de ' + D.cfg.CAP + ' t</td><td></td><td class="n">' + fmtUSD(b.fleteUSD) + '</td></tr>' +
+    '<tr><td>Flete por viaje de ' + D.cfg.CAP + ' t' + ((b.fletes || []).length ? ' <span class="small">(' + fmtARS(b.fleteARS) + ' + IVA; ' + fleteHist(b) + ')</span>' : '') + '</td><td></td><td class="n">' + fmtUSD(b.fleteUSD) + '</td></tr>' +
     '<tr><td>Puntas por t colocada</td><td></td><td class="n">' + fmtUSD2(b.puntasPorT) + '</td></tr>' +
     '<tr><td>Gasoil en planilla de Leandro: filtro</td><td></td><td class="n">"' + D.cfg.OBRA + '"</td></tr></table>';
 
@@ -408,7 +417,7 @@ const CFG_CAMPOS = [
   ['Comercial', 'TC', 'Tipo de cambio ($ por USD)', 'decimal'],
   ['Operación', 'OBRA_INICIO', 'Primer día de obra (AAAA-MM-DD): desde acá corren los fijos', 'text'],
   ['Operación', 'CAP_CAMION', 'Toneladas por viaje de mezcla', 'decimal'],
-  ['Operación', 'FLETE_ARS', 'Flete por viaje entero ($, sin IVA)', 'numeric'],
+  ['Operación', 'FLETE_ARS', 'Flete por viaje entero ($, sin IVA) al inicio de obra', 'numeric'],
   ['Operación', 'SOBREFRESADO', 't fresadas por t colocada', 'decimal'],
   ['Combustible', 'COMB_ESTIMADO_ARS', 'Gasoil estimado por día ($) si no hay dato real', 'numeric'],
   ['Combustible', 'COMB_CON_IVA', 'Los montos de combustible incluyen IVA (1 = sí, 0 = no)', 'numeric'],
@@ -425,9 +434,9 @@ const CFG_CAMPOS = [
   ['Puntas de fresadora', 'PUNTAS_VIDA_T', 't fresadas por punta (estimado hasta tener recambios)', 'decimal'],
   ['Acceso', 'PIN', 'PIN de la app', 'text'],
 ];
-let CFG = null, EQ = [], EQ0 = '[]';
+let CFG = null, EQ = [], EQ0 = '[]', FC = [], FC0 = '[]';
 function dirty() {
-  let d = JSON.stringify(EQ) !== EQ0;
+  let d = JSON.stringify(EQ) !== EQ0 || JSON.stringify(FC) !== FC0;
   document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) d = true; });
   document.getElementById('savebar').classList.toggle('on', d);
 }
@@ -448,12 +457,13 @@ function renderCriterios() {
       '<b>Costo por tonelada</b> del día = costo del día ÷ t colocadas ese día. El promedio de obra = costo acumulado ÷ t acumuladas.',
     ]) +
     g('Costos fijos (corren todos los días, se trabaje o no, fines de semana incluidos)', [
-      '<b>Equipos alquilados</b>: se pagan por mes. El precio mensual de cada equipo se divide por los días del mes calendario (31 en octubre, 30 en noviembre…) y se imputa todos los días. Cada equipo cuenta desde su fecha "desde"; antes no tiene costo. Los equipos propios van en 0.',
+      '<b>Equipos alquilados por mes</b>: el precio mensual de cada equipo se divide por los días del mes calendario (31 en octubre, 30 en noviembre…) y se imputa todos los días. Cada equipo cuenta entre su fecha "desde" y su fecha "hasta"; fuera de ese rango no tiene costo. Los equipos propios van en 0.',
+      '<b>Equipos por día trabajado</b>' + ((b.equipos || []).some(e => e.cobro === 'DIA') ? ' (' + b.equipos.filter(e => e.cobro === 'DIA').map(e => e.equipo).join(', ') + ')' : '') + ': se imputa su precio solo los días con producción, dentro de su rango desde/hasta.',
       '<b>Mano de obra</b>: hasta el ' + fDia(prevDia(b.moDesde)) + ' se pagó por jornada: ' + fmtUSD(b.moJornada) + ' solo los días que se tiró mezcla. Desde el <b>' + fDia(b.moDesde) + '</b> es mensual: ' + fmtUSD(b.moMes) + '/mes ÷ días del mes, todos los días.',
       '<b>Señalización</b>: mensual, ' + fmtUSD(b.senalMes) + '/mes ÷ días del mes, todos los días.',
     ]) +
     g('Costos variables (solo los días con producción)', [
-      '<b>Flete de mezcla</b>: ' + ars(k('FLETE_ARS', b.fleteUSD * D.cfg.TC)) + ' por viaje entero sin IVA (' + fmtUSD(b.fleteUSD) + '). Se usan los viajes cargados en el día; si no se cargaron, se calcula t ÷ ' + D.cfg.CAP + ' t por camión, redondeado para arriba.',
+      '<b>Flete de mezcla</b>: ' + ars(b.fleteARS != null ? b.fleteARS : k('FLETE_ARS', b.fleteUSD * D.cfg.TC)) + ' por viaje entero sin IVA (' + fmtUSD(b.fleteUSD) + ')' + ((b.fletes || []).length ? '; cada día se cobra con el precio vigente esa fecha (' + fleteHist(b) + ')' : '') + '. Se usan los viajes cargados en el día; si no se cargaron, se calcula t ÷ ' + D.cfg.CAP + ' t por camión, redondeado para arriba.',
       '<b>Puntas de fresadora</b>: ' + ars(b.puntaARS) + ' por punta con IVA. Por cada t colocada se fresan ' + k('SOBREFRESADO', '') + ' t. Vida: ' + fmtN(b.vidaPuntas, 1) + ' t fresadas por punta' + (b.vidaReal ? ' (real: t fresadas hasta el último recambio ÷ ' + b.puntasTotal + ' puntas cambiadas).' : ' (estimada; con recambios cargados se recalcula con la vida real).') + ' Resultado: ' + fmtUSD2(b.puntasPorT) + ' por t colocada.',
     ]) +
     g('Combustible', [
@@ -475,15 +485,17 @@ function cargarCostos() {
   api('config').then(c => {
     CFG = {}; c.config.forEach(r => CFG[r.clave] = r.valor);
     EQ = c.equipos; renderCriterios();
+    try { FC = JSON.parse(CFG.FLETE_CAMBIOS || '[]'); } catch (e) { FC = []; } if (!Array.isArray(FC)) FC = []; FC0 = JSON.stringify(FC);
     let h = '', g = '';
     CFG_CAMPOS.forEach(([grupo, k, label, mode]) => {
       if (grupo !== g) { if (g) h += '</div></details>'; g = grupo; h += '<details class="grp"><summary>' + grupo + '</summary><div class="in">'; }
       h += '<label>' + label + '</label><input data-k="' + k + '" type="' + (mode === 'text' ? 'text' : 'number') + '" ' + (mode === 'text' ? '' : 'inputmode="' + mode + '" step="any" min="0"') + ' value="' + String(CFG[k] == null ? '' : CFG[k]).replace(/"/g, '&quot;') + '" oninput="dirty()">';
+      if (k === 'FLETE_ARS') h += '<label>Cambios de precio del flete <span class="small">(cada día se cobra con el precio vigente esa fecha)</span></label><div id="fcList"></div><button class="btn sec2" type="button" style="margin-top:6px" onclick="FC.push({desde:\'\',ars:\'\'});renderFletes();dirty()">+ Cambio de precio</button>';
     });
     if (g) h += '</div></details>';
     document.getElementById('cfgForm').innerHTML = h;
     EQ0 = JSON.stringify(EQ);
-    renderEquipos();
+    renderEquipos(); renderFletes();
     document.getElementById('savebar').classList.remove('on');
   }).catch(e => toast('No se pudo leer la configuración: ' + e.message, 'mal'));
 }
@@ -491,11 +503,13 @@ function renderEquipos() {
   document.getElementById('eqCount').textContent = EQ.length + ' equipos';
   document.getElementById('eqList').innerHTML = EQ.map((e, i) => '<div class="eq">' +
     '<label style="margin-top:0">Equipo</label><input type="text" placeholder="Nombre del equipo" value="' + e.equipo.replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].equipo=this.value;dirty()">' +
-    '<div class="row"><div><label>Precio por mes</label><input type="number" inputmode="numeric" min="0" step="any" placeholder="0 = propio" value="' + e.precio + '" oninput="EQ[' + i + '].precio=this.value;sumEq(' + i + ');dirty()"></div>' +
+    '<div class="row"><div><label>Se cobra</label><select onchange="EQ[' + i + '].cobro=this.value;renderEquipos();dirty()"><option value="MES"' + (e.cobro === 'DIA' ? '' : ' selected') + '>por mes</option><option value="DIA"' + (e.cobro === 'DIA' ? ' selected' : '') + '>por día trabajado</option></select></div></div>' +
+    '<div class="row"><div><label>' + (e.cobro === 'DIA' ? 'Precio por día trabajado' : 'Precio por mes') + '</label><input type="number" inputmode="numeric" min="0" step="any" placeholder="0 = propio" value="' + e.precio + '" oninput="EQ[' + i + '].precio=this.value;sumEq(' + i + ');dirty()"></div>' +
     '<div style="flex:.6"><label>Moneda</label><select onchange="EQ[' + i + '].moneda=this.value;sumEq(' + i + ');dirty()"><option' + (e.moneda === 'ARS' ? ' selected' : '') + '>ARS</option><option' + (e.moneda === 'USD' ? ' selected' : '') + '>USD</option></select></div>' +
     '<div style="flex:.8"><label>IVA</label><select onchange="EQ[' + i + '].conIva=Number(this.value);sumEq(' + i + ');dirty()"><option value="0"' + (e.conIva ? '' : ' selected') + '>sin IVA</option><option value="1"' + (e.conIva ? ' selected' : '') + '>incluido</option></select></div></div>' +
     '<div class="row"><div><label>Cuenta desde <span class="small">(vacío = inicio de obra)</span></label><input type="date" value="' + (e.desde || '') + '" onchange="EQ[' + i + '].desde=this.value;dirty()"></div>' +
-    '<div><label>Observación <span class="small">(opcional)</span></label><input type="text" value="' + (e.obs || '').replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].obs=this.value;dirty()"></div></div>' +
+    '<div><label>Hasta <span class="small">(último día; vacío = sigue)</span></label><input type="date" value="' + (e.hasta || '') + '" onchange="EQ[' + i + '].hasta=this.value;dirty()"></div></div>' +
+    '<div class="row"><div><label>Observación <span class="small">(opcional)</span></label><input type="text" value="' + (e.obs || '').replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].obs=this.value;dirty()"></div></div>' +
     '<div class="sum" id="eqSum' + i + '"></div>' +
     '<button class="del" onclick="EQ.splice(' + i + ',1);renderEquipos();dirty()">Quitar equipo</button></div>').join('');
   EQ.forEach((e, i) => sumEq(i));
@@ -503,12 +517,23 @@ function renderEquipos() {
 function sumEq(i) {
   const e = EQ[i], tc = Number(document.querySelector('[data-k=TC]').value) || Number(CFG.TC) || 1, iva = Number(document.querySelector('[data-k=IVA]').value) || 0, dm = 30;
   let usd = e.moneda === 'USD' ? Number(e.precio) : Number(e.precio) / tc; if (Number(e.conIva) === 1) usd = usd / (1 + iva);
-  const el = document.getElementById('eqSum' + i); if (el) el.textContent = usd > 0 ? '= ' + fmtUSD(usd) + '/mes · ' + fmtUSD(usd / dm) + '/día' : 'propio / sin costo';
+  const el = document.getElementById('eqSum' + i); if (el) el.textContent = !(usd > 0) ? 'propio / sin costo' : e.cobro === 'DIA' ? '= ' + fmtUSD(usd) + ' por día trabajado' : '= ' + fmtUSD(usd) + '/mes · ' + fmtUSD(usd / dm) + '/día';
 }
-function agregarEquipo() { EQ.push({ equipo: '', precio: 0, moneda: 'ARS', conIva: 0, obs: '', desde: '' }); renderEquipos(); dirty(); const l = document.querySelectorAll('.eq'); l[l.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' }); l[l.length - 1].querySelector('input').focus(); }
+function renderFletes() {
+  const el = document.getElementById('fcList'); if (!el) return;
+  el.innerHTML = !FC.length ? '<div class="small">Sin cambios: rige el precio de arriba para toda la obra.</div>' : FC.map((c, i) => '<div class="row" style="margin-top:6px;align-items:flex-end">' +
+    '<div><label style="margin-top:0">Desde</label><input type="date" value="' + (c.desde || '') + '" onchange="FC[' + i + '].desde=this.value;dirty()"></div>' +
+    '<div><label style="margin-top:0">$ por viaje sin IVA</label><input type="number" inputmode="numeric" min="0" step="any" value="' + (c.ars === '' ? '' : c.ars) + '" oninput="FC[' + i + '].ars=this.value===\'\'?\'\':Number(this.value);dirty()"></div>' +
+    '<div style="flex:0 0 auto"><button class="del" style="border:0;background:none;color:var(--alerta);font-weight:600;font-size:13px;padding:10px 0" type="button" onclick="FC.splice(' + i + ',1);renderFletes();dirty()">Quitar</button></div></div>').join('');
+}
+function agregarEquipo() { EQ.push({ equipo: '', precio: 0, moneda: 'ARS', conIva: 0, obs: '', desde: '', hasta: '', cobro: 'MES' }); renderEquipos(); dirty(); const l = document.querySelectorAll('.eq'); l[l.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' }); l[l.length - 1].querySelector('input').focus(); }
 function guardarConfig() {
   const config = {};
   document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) config[i.dataset.k] = i.value; });
+  if (JSON.stringify(FC) !== FC0) {
+    if (FC.some(c => !c.desde || !(Number(c.ars) > 0))) { toast('Cada cambio de flete necesita fecha y precio', 'mal'); return; }
+    config.FLETE_CAMBIOS = JSON.stringify(FC);
+  }
   if (config.PIN !== undefined && !confirm('¿Cambiar el PIN de acceso? Todos van a tener que volver a entrar con el nuevo.')) return;
   const b = document.getElementById('bCfg'); b.disabled = true; b.textContent = 'Guardando…';
   api('guardarConfig', { config, equipos: EQ }, true).then(r => {
@@ -620,12 +645,12 @@ function preview() {
   const vIn = document.getElementById('fV').value;
   const viajes = vIn === '' ? Math.ceil(t / D.cfg.CAP) : Number(vIn);
   document.getElementById('fV').placeholder = 'auto: ' + Math.ceil(t / D.cfg.CAP);
-  const fijos = jornada ? D.base.fijoDia : 0;
+  const fijos = jornada ? D.base.fijoDia - (t > 0 ? 0 : (D.base.equiposPorJornada || 0)) : 0;
   const cIn = document.getElementById('fComb').value;
   const fIn = document.getElementById('fFecha').value;
   const conReal = !!(D.cfg.COMB_DESDE && fIn >= D.cfg.COMB_DESDE);
   const comb = cIn !== '' ? Number(cIn) / (D.cfg.COMB_CON_IVA ? 1 + D.cfg.IVA : 1) / D.cfg.TC : (jornada && !conReal ? D.base.combEstUSD : 0);
-  const flete = viajes * D.base.fleteUSD, puntas = t * D.base.puntasPorT;
+  const flete = viajes * (fIn ? fleteARSEn(D.base, fIn) / D.cfg.TC : D.base.fleteUSD), puntas = t * D.base.puntasPorT;
   const costo = fijos + comb + flete + puntas, fact = t * D.cfg.PRECIO_T, u = fact - costo;
   const f = document.getElementById('fFecha').value;
   const existe = D.serie.find(x => x.fecha === f);
