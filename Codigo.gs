@@ -211,7 +211,7 @@ function leerConfigCompleta_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sc = ss.getSheetByName(TABS.CONFIG);
   const config = sc.getLastRow() > 1 ? sc.getRange(2, 1, sc.getLastRow() - 1, 3).getValues().filter(r => r[0]).map(r => ({ clave: String(r[0]), valor: r[1] instanceof Date ? Utilities.formatDate(r[1], 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') : r[1], desc: String(r[2] || '') })) : [];
-  return { config, equipos: leerEquipos_() };
+  return { config, equipos: leerEquipos_(), vigencias: leerVigencias_(leerConfig_()) };
 }
 
 // Fecha de celda (Date o texto) → 'yyyy-MM-dd'; '' si está vacía o no se entiende
@@ -259,17 +259,28 @@ function guardarConfig(p, user) {
   const sc = ss.getSheetByName(TABS.CONFIG);
   const n = Math.max(sc.getLastRow() - 1, 0);
   const rows = n ? sc.getRange(2, 1, n, 2).getValues() : [];
-  const cambios = p.config || {};
+  const cambios = Object.assign({}, p.config || {});
+  // Vigencias por fecha: se guardan completas en VIGENCIAS. Una app vieja (en caché) todavía puede mandar
+  // FLETE_CAMBIOS: se pasa a vigencias de FLETE_ARS conservando las demás.
+  let vig = null;
+  if (p.vigencias !== undefined) vig = vigencias_(p.vigencias, true);
+  else if (cambios.FLETE_CAMBIOS !== undefined) {
+    vig = leerVigencias_(leerConfig_());
+    const fl = fleteCambios_(cambios.FLETE_CAMBIOS, true).map(c => ({ desde: c.desde, v: c.ars }));
+    if (fl.length) vig.FLETE_ARS = fl; else delete vig.FLETE_ARS;
+  }
+  delete cambios.FLETE_CAMBIOS; delete cambios.VIGENCIAS;
+  if (vig) { cambios.VIGENCIAS = JSON.stringify(vig); if (rows.some(r => String(r[0]) === 'FLETE_CAMBIOS')) cambios.FLETE_CAMBIOS = ''; }
   Object.keys(cambios).forEach(k => {
     let v = cambios[k];
     if (CLAVES_NUM.includes(k)) { v = Number(String(v).replace(',', '.')); if (isNaN(v) || v < 0) throw new Error('Valor inválido en ' + k); }
-    else if (k === 'FLETE_CAMBIOS') v = JSON.stringify(fleteCambios_(v, true));
+    else if (k === 'VIGENCIAS' || k === 'FLETE_CAMBIOS') { /* ya validado */ }
     else v = String(v).trim().slice(0, 200);
     if (k === 'PIN' && String(v).length < 4) throw new Error('El PIN debe tener al menos 4 caracteres');
     if ((k === 'TC' || k === 'PRECIO_T' || k === 'DIAS_MES' || k === 'CAP_CAMION' || k === 'PUNTAS_VIDA_T') && !(v > 0)) throw new Error(k + ' debe ser mayor a 0');
     const i = rows.findIndex(r => String(r[0]) === k);
     if (i >= 0) sc.getRange(i + 2, 2).setValue(v);
-    else sc.appendRow([k, v, '']);
+    else sc.appendRow([k, v, k === 'VIGENCIAS' ? 'Cambios de costos por fecha: { CLAVE: [{desde, v}] }. Se editan desde la app (pestaña Costos)' : '']);
   });
   if (Array.isArray(p.equipos)) {
     const se = ss.getSheetByName(TABS.EQUIPOS);
@@ -291,7 +302,63 @@ function guardarConfig(p, user) {
   return { ok: true };
 }
 
-// Cambios de precio del flete: [{desde:'yyyy-MM-dd', ars}] ordenados. Antes del primero rige FLETE_ARS.
+// ---------- Vigencias por fecha ----------
+// Los costos de esta lista no se aplican para atrás: el valor de CONFIG es el del inicio de obra y cada cambio
+// {desde, v} rige desde esa fecha inclusive. Cada día se calcula con el valor vigente ese día.
+// Se guardan en CONFIG > VIGENCIAS como JSON { CLAVE: [{desde:'yyyy-MM-dd', v}] }.
+// IVA, COMB_CON_IVA, SOBREFRESADO y PUNTAS_VIDA_T no van: son reglas o mediciones que, si cambian, corrigen toda la obra.
+const CLAVES_VIG = ['PRECIO_T', 'TC', 'CAP_CAMION', 'FLETE_ARS', 'COMB_ESTIMADO_ARS', 'MO_USD', 'MO_MES_USD', 'SENAL_MES_USD', 'PUNTAS_PRECIO_ARS'];
+const CLAVES_VIG_POSITIVAS = ['PRECIO_T', 'TC', 'CAP_CAMION'];   // tienen que ser > 0 (el resto puede ser 0)
+
+// Normaliza vigencias (JSON o objeto). estricto=true lanza si hay datos inválidos (al guardar).
+function vigencias_(v, estricto) {
+  let o = v;
+  if (typeof o === 'string') { try { o = o.trim() ? JSON.parse(o) : {}; } catch (e) { if (estricto) throw new Error('Cambios de costos inválidos'); o = {}; } }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) o = {};
+  const out = {};
+  CLAVES_VIG.forEach(k => {
+    if (!Array.isArray(o[k])) return;
+    const lista = [];
+    o[k].forEach(x => {
+      const desde = fechaStr_(x && x.desde), n = Number(String(x && x.v).replace(',', '.'));
+      const ok = desde && x.v !== '' && x.v !== null && !isNaN(n) && (CLAVES_VIG_POSITIVAS.includes(k) ? n > 0 : n >= 0);
+      if (!ok) { if (estricto) throw new Error('Cada cambio de ' + k + ' necesita fecha y un valor válido'); return; }
+      lista.push({ desde, v: n });
+    });
+    lista.sort((a, b) => a.desde < b.desde ? -1 : 1);
+    if (estricto) for (let i = 1; i < lista.length; i++) if (lista[i].desde === lista[i - 1].desde) throw new Error('Hay dos cambios de ' + k + ' con la misma fecha (' + lista[i].desde + ')');
+    if (lista.length) out[k] = lista;
+  });
+  return out;
+}
+
+// Vigencias guardadas. Los cambios de flete viejos (FLETE_CAMBIOS) se leen como vigencias de FLETE_ARS.
+function leerVigencias_(cfg) {
+  const vig = vigencias_(cfg.VIGENCIAS);
+  if (!vig.FLETE_ARS && cfg.FLETE_CAMBIOS) {
+    const fl = fleteCambios_(cfg.FLETE_CAMBIOS).map(c => ({ desde: c.desde, v: c.ars }));
+    if (fl.length) vig.FLETE_ARS = fl;
+  }
+  return vig;
+}
+
+// Valor inicial de cada clave (el de CONFIG). Puntas: planillas viejas tenían el precio del juego de 200.
+function valorInicial_(cfg, k) {
+  if (k === 'PUNTAS_PRECIO_ARS' && !(Number(cfg.PUNTAS_PRECIO_ARS) > 0)) return Number(cfg.PUNTAS_JUEGO_ARS) / 200 || 0;
+  return Number(cfg[k]) || 0;
+}
+
+// Devuelve (clave, fecha) → valor vigente ese día.
+function valorEnFn_(cfg, vig) {
+  const ini = {}; CLAVES_VIG.forEach(k => ini[k] = valorInicial_(cfg, k));
+  return (k, f) => {
+    let v = ini[k];
+    (vig[k] || []).forEach(c => { if (f >= c.desde) v = c.v; });
+    return v;
+  };
+}
+
+// Cambios de precio del flete (formato viejo, solo lectura): [{desde:'yyyy-MM-dd', ars}] ordenados.
 // Acepta el JSON guardado en CONFIG o un array. estricto=true lanza si hay datos inválidos (al guardar).
 function fleteCambios_(v, estricto) {
   let a = v;
@@ -309,18 +376,21 @@ function fleteCambios_(v, estricto) {
 }
 
 // Equipos: alquiler mensual (cobro MES: precio por mes) o por día trabajado (cobro DIA: precio por jornada con producción).
-// Cada uno cuenta entre DESDE y HASTA (vacíos = sin límite). "A régimen" = los que siguen vigentes (sin HASTA pasado).
-function costoEquiposDia_(cfg) {
+// Cada uno cuenta entre DESDE y HASTA (vacíos = sin límite). "A régimen" = los que rigen hoy (ni terminados ni futuros).
+// Los USD de acá usan el TC de hoy (para mostrar los costos vigentes); el cálculo de cada día usa el TC de ese día.
+function costoEquiposDia_(cfg, tc) {
   const lista = leerEquipos_();
   if (!lista.length) return { dia: 0, mes: 0, porJornada: 0, detalle: [] };
   const hoy = Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
   let mes = 0, porJornada = 0; const detalle = [];
   lista.forEach(e => {
-    let usd = e.moneda === 'USD' ? e.precio : e.precio / Number(cfg.TC);
+    let usd = e.moneda === 'USD' ? e.precio : e.precio / Number(tc);
     if (e.conIva === 1) usd = usd / (1 + Number(cfg.IVA));
-    const vigente = !e.hasta || e.hasta >= hoy;
+    const futuro = !!e.desde && e.desde > hoy;
+    const vigente = !futuro && (!e.hasta || e.hasta >= hoy);
     if (vigente) { if (e.cobro === 'DIA') porJornada += usd; else mes += usd; }
-    detalle.push({ equipo: e.equipo, cobro: e.cobro, usdMes: e.cobro === 'DIA' ? 0 : usd, usdDia: e.cobro === 'DIA' ? usd : 0, desde: e.desde || '', hasta: e.hasta || '', vigente });
+    detalle.push({ equipo: e.equipo, cobro: e.cobro, usdMes: e.cobro === 'DIA' ? 0 : usd, usdDia: e.cobro === 'DIA' ? usd : 0, desde: e.desde || '', hasta: e.hasta || '', vigente, futuro,
+      precio: e.precio, moneda: e.moneda, conIva: e.conIva });
   });
   return { dia: mes / 30 + porJornada, mes, porJornada, detalle };
 }
@@ -472,17 +542,19 @@ function aNumero_(v) {
 // ---------- Datos para la app ----------
 function getDatos(user) {
   const cfg = leerConfig_();
-  const TC = Number(cfg.TC), IVA = Number(cfg.IVA);
-  const eq = costoEquiposDia_(cfg);
-  const fijoDia = eq.dia + Number(cfg.MO_MES_USD) / 30 + Number(cfg.SENAL_MES_USD) / 30;
-  // flete: FLETE_ARS desde el inicio, con cambios de precio por fecha (FLETE_CAMBIOS)
-  const fletes = fleteCambios_(cfg.FLETE_CAMBIOS);
-  const fleteARSEn = f => { let v = Number(cfg.FLETE_ARS); fletes.forEach(c => { if (f >= c.desde) v = c.ars; }); return v; };
+  // Costos con vigencia por fecha: cada día usa el valor vigente ese día (val). Los "de hoy" son para mostrar.
+  const vig = leerVigencias_(cfg);
+  const val = valorEnFn_(cfg, vig);
   const hoyF = Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd');
+  const TC = val('TC', hoyF), IVA = Number(cfg.IVA);
+  const eq = costoEquiposDia_(cfg, TC);
+  const fijoDia = eq.dia + val('MO_MES_USD', hoyF) / 30 + val('SENAL_MES_USD', hoyF) / 30;
+  const fleteARSEn = f => val('FLETE_ARS', f);
+  const fletes = (vig.FLETE_ARS || []).map(c => ({ desde: c.desde, ars: c.v }));   // formato viejo, para el front en caché
   const fleteUSD = fleteARSEn(hoyF) / TC;
-  const combEstUSD = Number(cfg.COMB_ESTIMADO_ARS) / TC;
-  // precio por punta (con IVA). Planillas viejas: precio del juego de 200.
-  const puntaARS = Number(cfg.PUNTAS_PRECIO_ARS) > 0 ? Number(cfg.PUNTAS_PRECIO_ARS) : Number(cfg.PUNTAS_JUEGO_ARS) / 200;
+  const combEstUSD = val('COMB_ESTIMADO_ARS', hoyF) / TC;
+  // precio por punta (con IVA)
+  const puntaARS = val('PUNTAS_PRECIO_ARS', hoyF);
   const puntaUSD = puntaARS / (1 + IVA) / TC;
   const comb = combustiblePorDia_(cfg);
   const combDiv = Number(cfg.COMB_CON_IVA) === 1 ? (1 + IVA) : 1;
@@ -527,7 +599,8 @@ function getDatos(user) {
     const tHasta = dias.filter(d => d.fecha <= ultimo).reduce((s, d) => s + d.t * Number(cfg.SOBREFRESADO), 0);
     if (tHasta > 0) { vidaPuntas = tHasta / puntasTotal; vidaReal = true; }
   }
-  const puntasPorT = puntaUSD / vidaPuntas * Number(cfg.SOBREFRESADO);
+  const puntasPorTEn = f => val('PUNTAS_PRECIO_ARS', f) / (1 + IVA) / val('TC', f) / vidaPuntas * Number(cfg.SOBREFRESADO);
+  const puntasPorT = puntasPorTEn(hoyF);
 
   // ---- Calendario de obra: los fijos (alquileres, personal, señalización) corren TODOS los días hábiles
   //      desde el inicio de la obra, se tire mezcla o no. Combustible, flete y puntas solo cuando hay producción.
@@ -568,9 +641,11 @@ function getDatos(user) {
   // corre todos los días (findes incluidos), se trabaje o no.
   const diasDelMes = f => new Date(Number(f.slice(0, 4)), Number(f.slice(5, 7)), 0).getDate();
   // trabajado = día con producción: solo ahí cuentan los equipos que cobran por día trabajado
-  const equiposDiaEn = (f, trabajado) => eq.detalle.reduce((s, e) => !activo(e, f) ? s : s + (e.cobro === 'DIA' ? (trabajado ? e.usdDia : 0) : e.usdMes / diasDelMes(f)), 0);
+  // precio de un equipo en USD sin IVA con el TC del día
+  const usdEqEn = (e, f) => { let u = e.moneda === 'USD' ? e.precio : e.precio / val('TC', f); if (e.conIva === 1) u = u / (1 + IVA); return u; };
+  const equiposDiaEn = (f, trabajado) => eq.detalle.reduce((s, e) => !activo(e, f) ? s : s + (e.cobro === 'DIA' ? (trabajado ? usdEqEn(e, f) : 0) : usdEqEn(e, f) / diasDelMes(f)), 0);
   const moDesde = fechaStr_(cfg.MO_MES_DESDE) || inicio;
-  const moDiaEn = (f, jornada) => f >= moDesde ? Number(cfg.MO_MES_USD) / diasDelMes(f) : (jornada ? Number(cfg.MO_USD) : 0);
+  const moDiaEn = (f, jornada) => f >= moDesde ? val('MO_MES_USD', f) / diasDelMes(f) : (jornada ? val('MO_USD', f) : 0);
   const equiposActivosEn = (f, trabajado) => eq.detalle.filter(e => activo(e, f) && (e.cobro === 'DIA' ? trabajado && e.usdDia > 0 : e.usdMes > 0)).length;
   Object.values(meses).forEach(m => { m.equiposDia = equiposDiaEn(m.mes + '-28'); m.diasMes = diasDelMes(m.mes + '-01'); });
 
@@ -583,24 +658,25 @@ function getDatos(user) {
     const trabajado = !d.sinCarga && !!jornada && d.t > 0;
     const equiposDiaUsado = equiposDiaEn(f, trabajado);
     const moDia = moDiaEn(f, jornada);
-    const senal = Number(cfg.SENAL_MES_USD) / diasDelMes(f);   // señalización: mensual, todos los días
+    const senal = val('SENAL_MES_USD', f) / diasDelMes(f);   // señalización: mensual, todos los días
+    const tcF = val('TC', f), precioT = val('PRECIO_T', f);
     const fijos = equiposDiaUsado + moDia + senal;
     // Combustible: manual del día > real de las planillas > antes de COMB_DESDE estimado; desde COMB_DESDE,
     // si no hay carga registrada es porque no hubo consumo (0).
     const conReal = !combDesde || f >= combDesde;
     const c = conReal ? comb.porDia[f] : null;
     const manual = d.combArs !== null && d.combArs !== undefined && !isNaN(d.combArs);
-    const combUSD = manual ? d.combArs / combDiv / TC : (c ? c.ars / combDiv / TC : (conReal ? 0 : combEstUSD * jornada));
+    const combUSD = manual ? d.combArs / combDiv / tcF : (c ? c.ars / combDiv / tcF : (conReal ? 0 : val('COMB_ESTIMADO_ARS', f) / tcF * jornada));
     const combFuente = manual ? 'manual' : (c ? 'real' : (conReal ? 'sin consumo' : 'estimado'));
-    const viajes = d.viajes !== null && d.viajes !== undefined ? d.viajes : Math.ceil(d.t / Number(cfg.CAP_CAMION));
-    const flete = viajes * fleteARSEn(f) / TC;
-    const puntas = d.t * puntasPorT;
+    const viajes = d.viajes !== null && d.viajes !== undefined ? d.viajes : Math.ceil(d.t / val('CAP_CAMION', f));
+    const flete = viajes * fleteARSEn(f) / tcF;
+    const puntas = d.t * puntasPorTEn(f);
     const costo = fijos + combUSD + flete + puntas;
-    const fact = d.t * Number(cfg.PRECIO_T);
+    const fact = d.t * precioT;
     acum.t += d.t; acum.costo += costo; acum.fact += fact; if (!libre) acum.dias += 1; if (d.t > 0) acum.diasConCarga += 1;
     acum.comb += combUSD; acum.flete += flete; acum.fijos += fijos; acum.puntas += puntas;
     return {
-      fecha: f, t: d.t, viajes, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), libre, obs: d.obs, por: d.por, planta: !!d.planta, tPlanta: d.tPlanta === undefined ? null : d.tPlanta,
+      fecha: f, t: d.t, viajes, precioT, tc: tcF, jornada, sinCarga: !!d.sinCarga, finde: esFinde(f), libre, obs: d.obs, por: d.por, planta: !!d.planta, tPlanta: d.tPlanta === undefined ? null : d.tPlanta,
       fijos, equiposDia: equiposDiaUsado, moDia, senal, equiposN: equiposActivosEn(f, trabajado), diasMes: diasDelMes(f), mesCerrado: mesInfo.cerrado, comb: combUSD, combReal: combFuente !== 'estimado', combFuente, combArs: manual ? d.combArs : (c ? c.ars : null), litros: c ? c.litros : null, combDet: c ? c.registros : [], flete, puntas,
       costo, fact, utilidad: fact - costo, costoT: d.t > 0 ? costo / d.t : null,
       acumCostoT: acum.t > 0 ? acum.costo / acum.t : null, acumUtil: acum.fact - acum.costo,
@@ -608,8 +684,9 @@ function getDatos(user) {
   });
 
   return {
-    cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: Number(cfg.PRECIO_T), CAP: Number(cfg.CAP_CAMION), OBRA: cfg.OBRA_COMBUSTIBLE, COMB_DESDE: combDesde, CAMIONETAS: String(cfg.COMB_CAMIONETAS || '') },
-    base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: Number(cfg.MO_MES_USD) / 30, moMes: Number(cfg.MO_MES_USD), moJornada: Number(cfg.MO_USD), moDesde: fechaStr_(cfg.MO_MES_DESDE), senalDia: Number(cfg.SENAL_MES_USD) / 30, senalMes: Number(cfg.SENAL_MES_USD), equiposPorJornada: eq.porJornada, fijoDia, fleteUSD, fleteARS: fleteARSEn(hoyF), fleteInicialARS: Number(cfg.FLETE_ARS), fletes, combEstUSD, puntasPorT, puntaUSD, puntaARS, vidaPuntas, vidaReal, puntasTotal, equipos: eq.detalle },
+    cfg: { TC, IVA, COMB_CON_IVA: Number(cfg.COMB_CON_IVA) === 1 ? 1 : 0, PRECIO_T: val('PRECIO_T', hoyF), CAP: val('CAP_CAMION', hoyF), OBRA: cfg.OBRA_COMBUSTIBLE, COMB_DESDE: combDesde, CAMIONETAS: String(cfg.COMB_CAMIONETAS || '') },
+    base: { equiposDia: eq.dia, equiposMes: eq.mes, moDia: val('MO_MES_USD', hoyF) / 30, moMes: val('MO_MES_USD', hoyF), moJornada: val('MO_USD', hoyF), moDesde: fechaStr_(cfg.MO_MES_DESDE), senalDia: val('SENAL_MES_USD', hoyF) / 30, senalMes: val('SENAL_MES_USD', hoyF), equiposPorJornada: eq.porJornada, fijoDia, fleteUSD, fleteARS: fleteARSEn(hoyF), fleteInicialARS: Number(cfg.FLETE_ARS), fletes,
+      vig, ini: CLAVES_VIG.reduce((o, k) => (o[k] = valorInicial_(cfg, k), o), {}), combEstUSD, puntasPorT, puntaUSD, puntaARS, vidaPuntas, vidaReal, puntasTotal, sobrefresado: Number(cfg.SOBREFRESADO), equipos: eq.detalle },
     serie, acum, recambios, meses: Object.values(meses), inicio,
     equiposTotal: eq.detalle.filter(e => e.vigente && (e.usdMes > 0 || e.usdDia > 0)).length,
     combustible: comb.diag,
@@ -720,7 +797,7 @@ function avisarProduccion_(fecha, user) {
   const datos = getDatos(user);
   const d = datos.serie.find(x => x.fecha === fecha);
   if (!d) return { ok: false, error: 'día no encontrado' };
-  const precio = datos.cfg.PRECIO_T, ac = datos.acum, base = datos.base;
+  const precio = d.precioT, ac = datos.acum, base = datos.base;   // precio pactado vigente ese día
   const variablePorT = base.puntasPorT + base.fleteUSD / Math.max(1, datos.cfg.CAP);
   const equilibrio = (base.fijoDia + d.comb) / Math.max(0.01, precio - variablePorT);
   const promTDia = ac.dias ? ac.t / ac.dias : 0;

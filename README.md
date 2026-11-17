@@ -9,6 +9,7 @@ Panel de costo y utilidad diaria. Frontend en GitHub Pages + backend Apps Script
 - **Recambios de puntas** para calibrar la vida útil real.
 - **Panel**: costo/t del día y promedio de obra, utilidad del día / promedio / acumulada, punto de equilibrio, gráficos de evolución, estructura del costo.
 - **Costos editables desde la app** (pestaña Costos): parámetros de CONFIG y lista de EQUIPOS. La planilla es solo almacenamiento; nadie necesita abrirla.
+- **Cambios de costos por fecha** (no se aplican para atrás): tipo de cambio, precio pactado, t por viaje, flete, gasoil estimado, mano de obra (jornal y mensual), señalización y precio de la punta tienen "+ Cambio desde una fecha". El valor de CONFIG es el del inicio de obra; cada cambio rige desde su fecha y cada día se calcula con el valor vigente ese día. Se guardan en CONFIG › `VIGENCIAS` (JSON `{ CLAVE: [{desde, v}] }`); el viejo `FLETE_CAMBIOS` se lee como vigencias de `FLETE_ARS` y se vacía al guardar. Equipos: "Cambió el precio desde una fecha" cierra el renglón el día anterior (HASTA) y abre otro con el precio nuevo (DESDE). Corregir un valor sin fecha recalcula toda la obra y la app lo avisa antes de guardar. IVA, COMB_CON_IVA, SOBREFRESADO y PUNTAS_VIDA_T no tienen fecha.
 - **Combustible por día con prioridad**: monto manual cargado en el día → planillas (Leandro + Tiburcio) → antes de `COMB_DESDE` estimado, después 0.
 
 ## Arquitectura
@@ -33,6 +34,8 @@ Panel de costo y utilidad diaria. Frontend en GitHub Pages + backend Apps Script
 - Nunca pegar código en el editor online.
 
 ## Modelo de costo (por día cargado)
+
+Cada valor marcado (v) es el vigente ese día según VIGENCIAS (TC del día para pasar pesos a USD).
 
 ```
 fijos      = (Σ alquileres USD/mes ÷ DIAS_MES) + MO_USD + SENAL_USD
