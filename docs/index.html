@@ -251,9 +251,19 @@ const fmtUSD2 = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('es-A
 const fmtN = (v, d=1) => v == null ? '—' : Number(v).toLocaleString('es-AR', {maximumFractionDigits:d});
 const fDia = s => { const [y,m,d] = s.split('-'); return d + '/' + m; };
 const fDiaL = s => { const [y,m,d] = s.split('-'); return d + '/' + m + '/' + y.slice(2); };
-// flete vigente en una fecha: FLETE_ARS desde el inicio, con cambios de precio (base.fletes)
-const fleteARSEn = (b, f) => { let v = b.fleteInicialARS != null ? b.fleteInicialARS : b.fleteUSD * D.cfg.TC; (b.fletes || []).forEach(c => { if (f >= c.desde) v = c.ars; }); return v; };
-const fleteHist = b => ['al inicio ' + fmtARS(b.fleteInicialARS)].concat((b.fletes || []).map(c => 'desde ' + fDia(c.desde) + ' ' + fmtARS(c.ars))).join(' · ');
+// Costos con vigencia por fecha (igual que el backend): valor al inicio de obra (base.ini) y cambios {desde, v} (base.vig).
+// Datos viejos en caché sin base.ini: se usan los valores de hoy.
+const VIG_HOY = { PRECIO_T: () => D.cfg.PRECIO_T, TC: () => D.cfg.TC, CAP_CAMION: () => D.cfg.CAP, FLETE_ARS: () => D.base.fleteARS, COMB_ESTIMADO_ARS: () => D.base.combEstUSD * D.cfg.TC, MO_USD: () => D.base.moJornada, MO_MES_USD: () => D.base.moMes, SENAL_MES_USD: () => D.base.senalMes, PUNTAS_PRECIO_ARS: () => D.base.puntaARS };
+const vEn = (k, f) => { const b = D.base; if (!b.ini) return VIG_HOY[k](); let v = b.ini[k]; ((b.vig || {})[k] || []).forEach(c => { if (f >= c.desde) v = c.v; }); return v; };
+const fleteARSEn = (b, f) => vEn('FLETE_ARS', f);
+// historial legible de una clave: "al inicio X · desde 01/11 Y"
+const vigHist = (k, fmt) => { const b = D.base, l = ((b.vig || {})[k]) || []; return !b.ini || !l.length ? '' : ['al inicio ' + fmt(b.ini[k])].concat(l.map(c => 'desde ' + fDia(c.desde) + ' ' + fmt(c.v))).join(' · '); };
+const fleteHist = () => vigHist('FLETE_ARS', fmtARS);
+// [clave, nombre, formato] de los costos con vigencia por fecha (mismo orden que el backend)
+const VIG_CAMPOS = [['PRECIO_T', 'Precio pactado', v => fmtUSD2(v) + '/t'], ['TC', 'Tipo de cambio', v => fmtARS(v)], ['CAP_CAMION', 'Toneladas por viaje', v => fmtN(v, 1) + ' t'],
+  ['FLETE_ARS', 'Flete por viaje', v => fmtARS(v)], ['COMB_ESTIMADO_ARS', 'Gasoil estimado por día', v => fmtARS(v)], ['MO_USD', 'Mano de obra por día trabajado', v => fmtUSD(v)],
+  ['MO_MES_USD', 'Mano de obra por mes', v => fmtUSD(v)], ['SENAL_MES_USD', 'Señalización por mes', v => fmtUSD(v)], ['PUNTAS_PRECIO_ARS', 'Precio por punta', v => fmtARS(v)]];
+const VIG_KEYS = VIG_CAMPOS.map(x => x[0]);
 const eqN = x => (x.equiposN != null && D && D.equiposTotal && x.equiposN < D.equiposTotal) ? ', ' + x.equiposN + ' de ' + D.equiposTotal + ' equipos contando' : '';
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
@@ -311,9 +321,9 @@ function render() {
     ['Días trabajados', fmtN(a.diasConCarga,0), 'días con producción cargada · ' + a.dias + ' días de obra corridos', ''],
     ['Toneladas totales', fmtN(a.t,0) + ' t', 'tiradas desde el inicio de la obra', ''],
     ['Resultado de la obra', fmtUSD(utilObra), (utilObra >= 0 ? 'ganando' : 'perdiendo') + ' · facturado ' + fmtUSD(a.fact) + ' · costo ' + fmtUSD(a.costo), utilObra >= 0 ? 'ok' : 'mal', 'big'],
-    ['Costo/t último día', ult ? fmtUSD2(ult.costoT) : '—', ult ? fDiaL(ult.fecha) + ' · ' + fmtN(ult.t,1) + ' t' : 'sin datos', ult && ult.costoT != null ? (ult.costoT <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
-    ['Costo/t promedio obra', fmtUSD2(costoObra), a.t ? fmtN(a.t,0) + ' t en ' + a.dias + ' días de obra' : '', costoObra != null ? (costoObra <= D.cfg.PRECIO_T ? 'ok' : 'mal') : ''],
-    ['Utilidad último día', ult ? fmtUSD(ult.utilidad) : '—', 'precio ' + fmtUSD2(D.cfg.PRECIO_T) + '/t', ult ? (ult.utilidad >= 0 ? 'ok' : 'mal') : ''],
+    ['Costo/t último día', ult ? fmtUSD2(ult.costoT) : '—', ult ? fDiaL(ult.fecha) + ' · ' + fmtN(ult.t,1) + ' t' : 'sin datos', ult && ult.costoT != null ? (ult.costoT <= (ult.precioT || D.cfg.PRECIO_T) ? 'ok' : 'mal') : ''],
+    ['Costo/t promedio obra', fmtUSD2(costoObra), a.t ? fmtN(a.t,0) + ' t en ' + a.dias + ' días de obra' : '', costoObra != null ? (costoObra <= a.fact / a.t ? 'ok' : 'mal') : ''],
+    ['Utilidad último día', ult ? fmtUSD(ult.utilidad) : '—', 'precio ' + fmtUSD2(ult ? (ult.precioT || D.cfg.PRECIO_T) : D.cfg.PRECIO_T) + '/t', ult ? (ult.utilidad >= 0 ? 'ok' : 'mal') : ''],
     ['Utilidad promedio/día', fmtUSD(utilProm), 'en ' + a.dias + ' días', utilProm != null ? (utilProm >= 0 ? 'ok' : 'mal') : ''],
     ['Toneladas promedio/día', fmtN(a.diasConCarga ? a.t / a.diasConCarga : null,1), 'en ' + a.diasConCarga + ' días con carga · ' + fmtN(tProm,1) + ' t por día de obra', ''],
     ['Margen sobre facturación', margen == null ? '—' : fmtN(margen*100,1) + '%', 'facturado ' + fmtUSD(a.fact), margen != null ? (margen >= 0.1 ? 'ok' : margen >= 0 ? '' : 'mal') : ''],
@@ -331,6 +341,12 @@ function render() {
   // base de costos
   const b = D.base;
   const dm = 30;
+  const hs = (k, fmt) => { const h = vigHist(k, fmt); return h ? ' <span class="small">(' + h + ')</span>' : ''; };
+  const usdK = v => fmtUSD(v);
+  // un equipo con fecha "hasta" que sigue en otro renglón del mismo nombre: es el precio anterior
+  const mismo = (a, c) => String(a.equipo).trim().toLowerCase() === String(c.equipo).trim().toLowerCase();
+  const tagEq = x => x.futuro ? ' <span class="tag">empieza ' + fDia(x.desde) + '</span>'
+    : x.vigente === false ? (b.equipos.some(y => y !== x && mismo(x, y) && y.desde && x.hasta && y.desde > x.hasta) ? ' <span class="tag">precio anterior</span>' : ' <span class="tag">ya no está</span>') : '';
   document.getElementById('kpiCostos').innerHTML = [
     ['Costo fijo por día', fmtUSD(b.fijoDia + b.combEstUSD), 'equipos + personal + señal. + gasoil est.'],
     ['Precio pactado', fmtUSD2(D.cfg.PRECIO_T) + '/t', 'sin IVA · TC $ ' + fmtN(D.cfg.TC,0)],
@@ -342,19 +358,22 @@ function render() {
     b.equipos.map(x => {
       const rango = (x.desde ? ' desde ' + fDia(x.desde) : '') + (x.hasta ? ' hasta ' + fDia(x.hasta) : '');
       const porDia = x.cobro === 'DIA';
-      return '<tr' + (x.vigente === false ? ' style="opacity:.5"' : '') + '><td>' + x.equipo + (rango ? ' <span class="small">' + rango + '</span>' : '') + (x.vigente === false ? ' <span class="tag">ya no está</span>' : '') + '</td>' +
+      return '<tr' + (x.vigente === false ? ' style="opacity:.5"' : '') + '><td>' + x.equipo + (rango ? ' <span class="small">' + rango + '</span>' : '') + tagEq(x) + '</td>' +
         '<td class="n">' + (porDia ? '<span class="small">por día trabajado</span>' : x.usdMes > 0 ? fmtUSD(x.usdMes) : '<span class="small">propio</span>') + '</td>' +
         '<td class="n">' + (porDia ? fmtUSD(x.usdDia) : x.usdMes > 0 ? fmtUSD(x.usdMes / dm) : '') + '</td></tr>';
     }).join('') +
     '<tr class="tot"><td>Equipos vigentes <span class="small">(mensuales ÷ días del mes' + (b.equiposPorJornada > 0 ? ' + por día trabajado' : '') + ')</span></td><td class="n">' + fmtUSD(b.equiposMes) + '</td><td class="n">' + fmtUSD(b.equiposDia) + '</td></tr>' +
     '<tr class="sec"><td>Otros fijos</td><td class="n">por mes</td><td class="n">por día</td></tr>' +
-    '<tr><td>Mano de obra <span class="small">(mensual desde ' + fDia(b.moDesde) + '; antes ' + fmtUSD(b.moJornada) + ' por día trabajado)</span></td><td class="n">' + fmtUSD(b.moMes) + '</td><td class="n">' + fmtUSD(b.moDia) + '</td></tr>' +
-    '<tr><td>Señalización</td><td class="n">' + fmtUSD(b.senalMes) + '</td><td class="n">' + fmtUSD(b.senalDia) + '</td></tr>' +
-    '<tr><td>Gasoil estimado <span class="small">(si no hay dato real)</span></td><td></td><td class="n">' + fmtUSD(b.combEstUSD) + '</td></tr>' +
+    '<tr><td>Mano de obra <span class="small">(mensual desde ' + fDia(b.moDesde) + '; antes ' + fmtUSD(b.moJornada) + ' por día trabajado)</span>' + hs('MO_MES_USD', usdK) + '</td><td class="n">' + fmtUSD(b.moMes) + '</td><td class="n">' + fmtUSD(b.moDia) + '</td></tr>' +
+    '<tr><td>Señalización' + hs('SENAL_MES_USD', usdK) + '</td><td class="n">' + fmtUSD(b.senalMes) + '</td><td class="n">' + fmtUSD(b.senalDia) + '</td></tr>' +
+    '<tr><td>Gasoil estimado <span class="small">(si no hay dato real)</span>' + hs('COMB_ESTIMADO_ARS', fmtARS) + '</td><td></td><td class="n">' + fmtUSD(b.combEstUSD) + '</td></tr>' +
     '<tr class="tot"><td>Total fijo por día</td><td></td><td class="n">' + fmtUSD(b.fijoDia + b.combEstUSD) + '</td></tr>' +
     '<tr class="sec"><td>Variables</td><td></td><td></td></tr>' +
-    '<tr><td>Flete por viaje de ' + D.cfg.CAP + ' t' + ((b.fletes || []).length ? ' <span class="small">(' + fmtARS(b.fleteARS) + ' + IVA; ' + fleteHist(b) + ')</span>' : '') + '</td><td></td><td class="n">' + fmtUSD(b.fleteUSD) + '</td></tr>' +
-    '<tr><td>Puntas por t colocada</td><td></td><td class="n">' + fmtUSD2(b.puntasPorT) + '</td></tr>' +
+    '<tr><td>Flete por viaje de ' + D.cfg.CAP + ' t <span class="small">(' + fmtARS(b.fleteARS) + ' + IVA' + (fleteHist() ? '; ' + fleteHist() : '') + ')</span>' + hs('CAP_CAMION', v => fmtN(v, 1) + ' t') + '</td><td></td><td class="n">' + fmtUSD(b.fleteUSD) + '</td></tr>' +
+    '<tr><td>Puntas por t colocada' + hs('PUNTAS_PRECIO_ARS', v => fmtARS(v) + '/punta') + '</td><td></td><td class="n">' + fmtUSD2(b.puntasPorT) + '</td></tr>' +
+    (vigHist('PRECIO_T', fmtUSD2) || vigHist('TC', fmtARS) ? '<tr class="sec"><td>Comercial</td><td></td><td></td></tr>' +
+      '<tr><td>Precio pactado por t' + hs('PRECIO_T', fmtUSD2) + '</td><td></td><td class="n">' + fmtUSD2(D.cfg.PRECIO_T) + '</td></tr>' +
+      '<tr><td>Tipo de cambio' + hs('TC', fmtARS) + '</td><td></td><td class="n">' + fmtARS(D.cfg.TC) + '</td></tr>' : '') +
     '<tr><td>Gasoil en planilla de Leandro: filtro</td><td></td><td class="n">"' + D.cfg.OBRA + '"</td></tr></table>';
 
   renderComb();
@@ -372,7 +391,7 @@ function render() {
       { type:'bar', label:'t colocadas', data:tDia, backgroundColor:alfa(G[0], .22), borderRadius:3, yAxisID:'yT', order:3 },
       { type:'line', label:'Costo/t del día', data:serieCal(x=>x.costoT), borderColor:G[0], backgroundColor:G[0], tension:.2, pointRadius:3, spanGaps:true, yAxisID:'y', order:1 },
       { type:'line', label:'Promedio obra', data:promCal, borderColor:G[4], borderDash:[6,4], pointRadius:0, tension:.2, yAxisID:'y', order:1 },
-      { type:'line', label:'Precio pactado', data:CAL.map(()=>D.cfg.PRECIO_T), borderColor:G[1], pointRadius:0, borderWidth:2, yAxisID:'y', order:1 } ]},
+      { type:'line', label:'Precio pactado', data:CAL.map(f=>vEn('PRECIO_T', f)), borderColor:G[1], pointRadius:0, borderWidth:2, yAxisID:'y', order:1 } ]},
       options:{ plugins:{legend:{position:'bottom', labels:{boxWidth:14}}}, scales:{ y:{title:{display:true,text:'USD/t'}}, yT:{position:'right', beginAtZero:true, grid:{drawOnChartArea:false}, title:{display:true,text:'t'}} } } }),
     util: () => ({ type:'bar', data:{ labels:lbl, datasets:[
       { type:'bar', label:'Utilidad del día', data:CAL.map(f => porFecha[f] ? porFecha[f].utilidad : 0), backgroundColor:CAL.map(f => porFecha[f] && porFecha[f].utilidad >= 0 ? alfa(G[1], .65) : alfa(G[3], .6)), borderRadius:3, order:2 },
@@ -389,13 +408,14 @@ const fmtARS = v => v == null ? '—' : '$ ' + Number(v).toLocaleString('es-AR',
 function renderComb() {
   const cs = D.consumos || [], s = D.serie;
   const divIVA = D.cfg.COMB_CON_IVA ? (1 + D.cfg.IVA) : 1;
-  const usd = ars => ars / divIVA / D.cfg.TC;
+  // cada carga se pasa a USD con el tipo de cambio vigente el día de la carga
+  const usdCs = cs.reduce((a, e) => a + (e.cargas || []).reduce((s2, c) => s2 + (Number(c.ars) || 0) / divIVA / vEn('TC', c.fecha), 0), 0);
   const real = s.filter(x => x.combFuente === 'real'), manual = s.filter(x => x.combFuente === 'manual');
   const litros = cs.reduce((a, e) => a + e.litros, 0), ars = cs.reduce((a, e) => a + e.ars, 0);
   const lObra = cs.filter(e => e.fuente === 'obra').reduce((a, e) => a + e.litros, 0), lCam = litros - lObra;
   document.getElementById('combTitulo').textContent = D.cfg.COMB_DESDE ? 'desde ' + fDiaL(D.cfg.COMB_DESDE) : '';
   document.getElementById('combResumen').innerHTML = cs.length
-    ? '<b>' + fmtN(litros,0) + ' l</b> en ' + cs.reduce((a, e) => a + e.n, 0) + ' cargas · ' + fmtARS(ars) + ' con IVA = <b>' + fmtUSD(usd(ars)) + '</b> · equipos ' + fmtN(lObra,0) + ' l · camionetas ' + fmtN(lCam,0) + ' l' + (real.length ? ' · ' + fmtN(litros / real.length,0) + ' l por día con carga' : '') + (manual.length ? ' · ' + manual.length + ' día(s) con monto manual, no incluidos acá' : '')
+    ? '<b>' + fmtN(litros,0) + ' l</b> en ' + cs.reduce((a, e) => a + e.n, 0) + ' cargas · ' + fmtARS(ars) + ' con IVA = <b>' + fmtUSD(usdCs) + '</b> · equipos ' + fmtN(lObra,0) + ' l · camionetas ' + fmtN(lCam,0) + ' l' + (real.length ? ' · ' + fmtN(litros / real.length,0) + ' l por día con carga' : '') + (manual.length ? ' · ' + manual.length + ' día(s) con monto manual, no incluidos acá' : '')
     : 'Sin cargas registradas en las planillas para esta obra.';
   const fmtCons = e => e.consumo == null ? '<span class="small">' + (e.aviso || 'sin consumo') + '</span>' : '<b>' + fmtN(e.consumo, 1) + ' ' + e.unidad + '</b> <span class="small">· ' + fmtN(e.litrosTramo,0) + ' l en ' + fmtN(e.delta,0) + (e.unidad === 'km/l' ? ' km' : ' h') + ', ' + e.lecturas + ' lecturas' + (e.aviso ? ' · ' + e.aviso : '') + '</span>';
   const nombre = e => { const m = String(e.equipo || '').split(' — '); return m.length > 1 ? '<b>' + m[0] + '</b> <span class="small">' + m.slice(1).join(' — ') + '</span>' : '<b>' + e.equipo + '</b>'; };
@@ -405,7 +425,7 @@ function renderComb() {
       '<tr id="cd' + id + '" class="cdet"><td colspan="4"><table>' + e.cargas.map(c => '<tr><td>' + fDiaL(c.fecha) + '</td><td class="small">' + (c.operario || '') + '</td><td class="n">' + fmtN(c.litros,0) + ' l</td><td class="n">' + fmtARS(c.ars) + '</td><td class="n small">' + (c.hor != null ? fmtN(c.hor,0) + (e.unidad === 'km/l' ? ' km' : ' h') : 'sin lectura') + '</td></tr>').join('') + '</table></td></tr>';
   }).join(''); };
   document.getElementById('tComb').innerHTML = !cs.length ? '' : '<tr><th>Equipo · consumo</th><th class="n">Cargas</th><th class="n">Litros</th><th class="n">$ c/IVA</th></tr>' + sec('Equipos de obra · planilla de Leandro', 'obra') + sec('Camionetas · planilla de Tiburcio', 'camioneta') +
-    '<tr class="tot"><td>Total <span class="small">' + fmtUSD(usd(ars)) + ' neto</span></td><td class="n">' + cs.reduce((a, e) => a + e.n, 0) + '</td><td class="n">' + fmtN(litros,0) + '</td><td class="n">' + fmtARS(ars) + '</td></tr>';
+    '<tr class="tot"><td>Total <span class="small">' + fmtUSD(usdCs) + ' neto</span></td><td class="n">' + cs.reduce((a, e) => a + e.n, 0) + '</td><td class="n">' + fmtN(litros,0) + '</td><td class="n">' + fmtARS(ars) + '</td></tr>';
   const dias = s.filter(x => x.combFuente === 'real' || x.combFuente === 'manual');
   document.getElementById('tCombDia').innerHTML = !dias.length ? '<tr><td class="small">Sin días con combustible real.</td></tr>' : '<tr><th>Día</th><th class="n">t</th><th class="n">Litros</th><th class="n">$ c/IVA</th><th class="n">US$</th><th class="n">US$/t</th><th>Cargas</th></tr>' +
     [...dias].reverse().map(x => '<tr><td>' + fDiaL(x.fecha) + (x.combFuente === 'manual' ? '<span class="tag">manual</span>' : '') + '</td><td class="n">' + fmtN(x.t,1) + '</td><td class="n">' + (x.litros != null ? fmtN(x.litros,0) : '—') + '</td><td class="n">' + fmtARS(x.combArs) + '</td><td class="n">' + fmtUSD(x.comb) + '</td><td class="n">' + (x.t > 0 ? fmtUSD2(x.comb / x.t) : '—') + '</td><td class="small">' + (x.combDet || []).map(r => (r.codigo || r.equipo || '?') + ' ' + fmtN(r.litros,0) + ' l').join(' · ') + '</td></tr>').join('');
@@ -417,7 +437,7 @@ const CFG_CAMPOS = [
   ['Comercial', 'TC', 'Tipo de cambio ($ por USD)', 'decimal'],
   ['Operación', 'OBRA_INICIO', 'Primer día de obra (AAAA-MM-DD): desde acá corren los fijos', 'text'],
   ['Operación', 'CAP_CAMION', 'Toneladas por viaje de mezcla', 'decimal'],
-  ['Operación', 'FLETE_ARS', 'Flete por viaje entero ($, sin IVA) al inicio de obra', 'numeric'],
+  ['Operación', 'FLETE_ARS', 'Flete por viaje entero ($, sin IVA)', 'numeric'],
   ['Operación', 'SOBREFRESADO', 't fresadas por t colocada', 'decimal'],
   ['Combustible', 'COMB_ESTIMADO_ARS', 'Gasoil estimado por día ($) si no hay dato real', 'numeric'],
   ['Combustible', 'COMB_CON_IVA', 'Los montos de combustible incluyen IVA (1 = sí, 0 = no)', 'numeric'],
@@ -434,10 +454,14 @@ const CFG_CAMPOS = [
   ['Puntas de fresadora', 'PUNTAS_VIDA_T', 't fresadas por punta (estimado hasta tener recambios)', 'decimal'],
   ['Acceso', 'PIN', 'PIN de la app', 'text'],
 ];
-let CFG = null, EQ = [], EQ0 = '[]', FC = [], FC0 = '[]';
+// VG: cambios por fecha que se están editando { CLAVE: [{desde, v}] }; VG0 lo guardado.
+let CFG = null, EQ = [], EQ0 = '[]', VG = {}, VG0 = '{}';
+const eqJSON = () => JSON.stringify(EQ, (k, v) => k.charAt(0) === '_' ? undefined : v);   // sin campos de pantalla (_p0, _cambio)
+const vgJSON = () => { const o = {}; VIG_KEYS.forEach(k => { if ((VG[k] || []).length) o[k] = VG[k]; }); return JSON.stringify(o); };
+const hoyStr = () => (D && D.hoy) || new Date().toISOString().slice(0, 10);
 function dirty() {
-  let d = JSON.stringify(EQ) !== EQ0 || JSON.stringify(FC) !== FC0;
-  document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) d = true; });
+  let d = eqJSON() !== EQ0 || vgJSON() !== VG0;
+  document.querySelectorAll('#cfgForm [data-k]').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) d = true; });
   document.getElementById('savebar').classList.toggle('on', d);
 }
 function descartarConfig() { CFG = null; cargarCostos(); }
@@ -449,13 +473,19 @@ function renderCriterios() {
   const g = (t, items) => '<h4>' + t + '</h4><ul>' + items.map(x => '<li>' + x + '</li>').join('') + '</ul>';
   el.innerHTML =
     g('General', [
-      'Todo se calcula en <b>dólares, sin IVA</b>. Los montos en pesos se pasan a USD con el tipo de cambio de Costos (hoy ' + ars(D.cfg.TC) + ').',
+      'Todo se calcula en <b>dólares, sin IVA</b>. Los montos en pesos de cada día se pasan a USD con el tipo de cambio vigente ese día (hoy ' + ars(D.cfg.TC) + ').',
       'Los montos que vienen con IVA (combustible de las planillas, puntas, equipos marcados "con IVA") se netean dividiendo por 1 + IVA (' + fmtN(D.cfg.IVA * 100, 0) + ' %).',
       'La obra empieza el <b>' + fDia(k('OBRA_INICIO', D.inicio)) + '</b>: desde ese día se cuenta cada día del calendario hasta hoy.',
-      '<b>Facturación</b> del día = toneladas colocadas × precio pactado (' + fmtUSD2(D.cfg.PRECIO_T) + '/t, sin IVA).',
+      '<b>Facturación</b> del día = toneladas colocadas × precio pactado vigente ese día (hoy ' + fmtUSD2(D.cfg.PRECIO_T) + '/t, sin IVA).',
       '<b>Utilidad</b> del día = facturación − costo del día. La acumulada es la suma desde el inicio.',
       '<b>Costo por tonelada</b> del día = costo del día ÷ t colocadas ese día. El promedio de obra = costo acumulado ÷ t acumuladas.',
     ]) +
+    g('Cambios de costos por fecha (no se aplican para atrás)', [
+      'Tipo de cambio, precio pactado, flete, t por viaje, gasoil estimado, mano de obra, señalización y precio de las puntas: cada cambio rige <b>desde su fecha</b>; los días anteriores quedan con el valor que tenían. Se cargan en Modificar costos › "+ Cambio desde una fecha".',
+      'Equipos alquilados: "Cambió el precio" cierra el renglón con el precio anterior el día previo y abre uno nuevo desde la fecha del cambio.',
+      'Corregir el valor "al inicio de obra" o el precio de un equipo sin fecha sí cambia toda la obra para atrás (sirve para arreglar un error de carga).',
+      'IVA, combustible con IVA, sobrefresado y vida estimada de las puntas no tienen fecha: son reglas o mediciones y valen para toda la obra.',
+    ].concat(VIG_CAMPOS.map(([k, n, fm]) => vigHist(k, fm) ? '<b>' + n + '</b>: ' + vigHist(k, fm) + '.' : '').filter(Boolean))) +
     g('Costos fijos (corren todos los días, se trabaje o no, fines de semana incluidos)', [
       '<b>Equipos alquilados por mes</b>: el precio mensual de cada equipo se divide por los días del mes calendario (31 en octubre, 30 en noviembre…) y se imputa todos los días. Cada equipo cuenta entre su fecha "desde" y su fecha "hasta"; fuera de ese rango no tiene costo. Los equipos propios van en 0.',
       '<b>Equipos por día trabajado</b>' + ((b.equipos || []).some(e => e.cobro === 'DIA') ? ' (' + b.equipos.filter(e => e.cobro === 'DIA').map(e => e.equipo).join(', ') + ')' : '') + ': se imputa su precio solo los días con producción, dentro de su rango desde/hasta.',
@@ -463,8 +493,8 @@ function renderCriterios() {
       '<b>Señalización</b>: mensual, ' + fmtUSD(b.senalMes) + '/mes ÷ días del mes, todos los días.',
     ]) +
     g('Costos variables (solo los días con producción)', [
-      '<b>Flete de mezcla</b>: ' + ars(b.fleteARS != null ? b.fleteARS : k('FLETE_ARS', b.fleteUSD * D.cfg.TC)) + ' por viaje entero sin IVA (' + fmtUSD(b.fleteUSD) + ')' + ((b.fletes || []).length ? '; cada día se cobra con el precio vigente esa fecha (' + fleteHist(b) + ')' : '') + '. Se usan los viajes cargados en el día; si no se cargaron, se calcula t ÷ ' + D.cfg.CAP + ' t por camión, redondeado para arriba.',
-      '<b>Puntas de fresadora</b>: ' + ars(b.puntaARS) + ' por punta con IVA. Por cada t colocada se fresan ' + k('SOBREFRESADO', '') + ' t. Vida: ' + fmtN(b.vidaPuntas, 1) + ' t fresadas por punta' + (b.vidaReal ? ' (real: t fresadas hasta el último recambio ÷ ' + b.puntasTotal + ' puntas cambiadas).' : ' (estimada; con recambios cargados se recalcula con la vida real).') + ' Resultado: ' + fmtUSD2(b.puntasPorT) + ' por t colocada.',
+      '<b>Flete de mezcla</b>: ' + ars(b.fleteARS != null ? b.fleteARS : k('FLETE_ARS', b.fleteUSD * D.cfg.TC)) + ' por viaje entero sin IVA (' + fmtUSD(b.fleteUSD) + ')' + (fleteHist() ? '; cada día se cobra con el precio vigente esa fecha (' + fleteHist() + ')' : '') + '. Se usan los viajes cargados en el día; si no se cargaron, se calcula t ÷ ' + D.cfg.CAP + ' t por camión, redondeado para arriba.',
+      '<b>Puntas de fresadora</b>: ' + ars(b.puntaARS) + ' por punta con IVA (cada día con el precio vigente esa fecha). Por cada t colocada se fresan ' + k('SOBREFRESADO', '') + ' t. Vida: ' + fmtN(b.vidaPuntas, 1) + ' t fresadas por punta' + (b.vidaReal ? ' (real: t fresadas hasta el último recambio ÷ ' + b.puntasTotal + ' puntas cambiadas).' : ' (estimada; con recambios cargados se recalcula con la vida real).') + ' Resultado: ' + fmtUSD2(b.puntasPorT) + ' por t colocada.',
     ]) +
     g('Combustible', [
       'Prioridad para cada día: <b>1)</b> el monto cargado a mano en "Cargar día"; <b>2)</b> lo real de las planillas de combustible; <b>3)</b> antes del ' + fDia(D.cfg.COMB_DESDE) + ', un estimado de ' + ars(k('COMB_ESTIMADO_ARS', b.combEstUSD * D.cfg.TC)) + ' por día trabajado.',
@@ -485,17 +515,24 @@ function cargarCostos() {
   api('config').then(c => {
     CFG = {}; c.config.forEach(r => CFG[r.clave] = r.valor);
     EQ = c.equipos; renderCriterios();
-    try { FC = JSON.parse(CFG.FLETE_CAMBIOS || '[]'); } catch (e) { FC = []; } if (!Array.isArray(FC)) FC = []; FC0 = JSON.stringify(FC);
+    // precio original de cada equipo, para avisar si se corrige sin fecha (eso cambia toda la obra)
+    EQ.forEach(e => e._p0 = { precio: Number(e.precio), moneda: e.moneda, conIva: Number(e.conIva), cobro: e.cobro });
+    VG = {};
+    let vg = c.vigencias;
+    if (!vg) { try { vg = JSON.parse(CFG.VIGENCIAS || '{}'); } catch (e) { vg = {}; } }
+    VIG_KEYS.forEach(k => { if (Array.isArray(vg[k]) && vg[k].length) VG[k] = vg[k].map(x => ({ desde: x.desde, v: x.v })); });
+    VG0 = vgJSON();
     let h = '', g = '';
     CFG_CAMPOS.forEach(([grupo, k, label, mode]) => {
       if (grupo !== g) { if (g) h += '</div></details>'; g = grupo; h += '<details class="grp"><summary>' + grupo + '</summary><div class="in">'; }
-      h += '<label>' + label + '</label><input data-k="' + k + '" type="' + (mode === 'text' ? 'text' : 'number') + '" ' + (mode === 'text' ? '' : 'inputmode="' + mode + '" step="any" min="0"') + ' value="' + String(CFG[k] == null ? '' : CFG[k]).replace(/"/g, '&quot;') + '" oninput="dirty()">';
-      if (k === 'FLETE_ARS') h += '<label>Cambios de precio del flete <span class="small">(cada día se cobra con el precio vigente esa fecha)</span></label><div id="fcList"></div><button class="btn sec2" type="button" style="margin-top:6px" onclick="FC.push({desde:\'\',ars:\'\'});renderFletes();dirty()">+ Cambio de precio</button>';
+      const conFecha = VIG_KEYS.includes(k);
+      h += '<label>' + label + (conFecha ? ' <span class="small">— valor al inicio de obra</span>' : '') + '</label><input data-k="' + k + '" type="' + (mode === 'text' ? 'text' : 'number') + '" ' + (mode === 'text' ? '' : 'inputmode="' + mode + '" step="any" min="0"') + ' value="' + String(CFG[k] == null ? '' : CFG[k]).replace(/"/g, '&quot;') + '" oninput="dirty();renderVig(\'' + k + '\')">';
+      if (conFecha) h += '<div class="vig" id="vg-' + k + '"></div><button class="btn sec2" type="button" style="margin-top:6px" onclick="agregarVig(\'' + k + '\')">+ Cambio desde una fecha</button>';
     });
     if (g) h += '</div></details>';
     document.getElementById('cfgForm').innerHTML = h;
-    EQ0 = JSON.stringify(EQ);
-    renderEquipos(); renderFletes();
+    EQ0 = eqJSON();
+    renderEquipos(); VIG_KEYS.forEach(renderVig);
     document.getElementById('savebar').classList.remove('on');
   }).catch(e => toast('No se pudo leer la configuración: ' + e.message, 'mal'));
 }
@@ -504,39 +541,88 @@ function renderEquipos() {
   document.getElementById('eqList').innerHTML = EQ.map((e, i) => '<div class="eq">' +
     '<label style="margin-top:0">Equipo</label><input type="text" placeholder="Nombre del equipo" value="' + e.equipo.replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].equipo=this.value;dirty()">' +
     '<div class="row"><div><label>Se cobra</label><select onchange="EQ[' + i + '].cobro=this.value;renderEquipos();dirty()"><option value="MES"' + (e.cobro === 'DIA' ? '' : ' selected') + '>por mes</option><option value="DIA"' + (e.cobro === 'DIA' ? ' selected' : '') + '>por día trabajado</option></select></div></div>' +
-    '<div class="row"><div><label>' + (e.cobro === 'DIA' ? 'Precio por día trabajado' : 'Precio por mes') + '</label><input type="number" inputmode="numeric" min="0" step="any" placeholder="0 = propio" value="' + e.precio + '" oninput="EQ[' + i + '].precio=this.value;sumEq(' + i + ');dirty()"></div>' +
+    '<div class="row"><div><label>' + (e.cobro === 'DIA' ? 'Precio por día trabajado' : 'Precio por mes') + (e._p0 ? ' <span class="small">(corregirlo cambia toda la obra)</span>' : '') + '</label><input type="number" inputmode="numeric" min="0" step="any" placeholder="0 = propio" value="' + e.precio + '" oninput="EQ[' + i + '].precio=this.value;sumEq(' + i + ');dirty()"></div>' +
     '<div style="flex:.6"><label>Moneda</label><select onchange="EQ[' + i + '].moneda=this.value;sumEq(' + i + ');dirty()"><option' + (e.moneda === 'ARS' ? ' selected' : '') + '>ARS</option><option' + (e.moneda === 'USD' ? ' selected' : '') + '>USD</option></select></div>' +
     '<div style="flex:.8"><label>IVA</label><select onchange="EQ[' + i + '].conIva=Number(this.value);sumEq(' + i + ');dirty()"><option value="0"' + (e.conIva ? '' : ' selected') + '>sin IVA</option><option value="1"' + (e.conIva ? ' selected' : '') + '>incluido</option></select></div></div>' +
     '<div class="row"><div><label>Cuenta desde <span class="small">(vacío = inicio de obra)</span></label><input type="date" value="' + (e.desde || '') + '" onchange="EQ[' + i + '].desde=this.value;dirty()"></div>' +
     '<div><label>Hasta <span class="small">(último día; vacío = sigue)</span></label><input type="date" value="' + (e.hasta || '') + '" onchange="EQ[' + i + '].hasta=this.value;dirty()"></div></div>' +
     '<div class="row"><div><label>Observación <span class="small">(opcional)</span></label><input type="text" value="' + (e.obs || '').replace(/"/g, '&quot;') + '" oninput="EQ[' + i + '].obs=this.value;dirty()"></div></div>' +
     '<div class="sum" id="eqSum' + i + '"></div>' +
+    (e._cambio ? '<div class="eqc" id="eqc' + i + '" style="margin-top:8px;padding:10px;border:1px solid var(--linea);border-radius:10px"><div class="small">El precio de arriba queda hasta el día anterior a esta fecha; desde la fecha rige el nuevo. Los días anteriores no cambian.</div>' +
+      '<div class="row"><div><label>Desde</label><input type="date" value="' + (e._cambio.desde || '') + '" onchange="EQ[' + i + ']._cambio.desde=this.value"></div>' +
+      '<div><label>Precio nuevo (' + e.moneda + (e.cobro === 'DIA' ? ' por día' : ' por mes') + ')</label><input type="number" inputmode="numeric" min="0" step="any" value="' + e._cambio.precio + '" oninput="EQ[' + i + ']._cambio.precio=this.value"></div></div>' +
+      '<div class="row" style="margin-top:8px"><button class="btn" type="button" onclick="aplicarCambioEq(' + i + ')">Aplicar</button><button class="btn sec2" type="button" onclick="delete EQ[' + i + ']._cambio;renderEquipos()">Cancelar</button></div></div>'
+      : (Number(e.precio) > 0 && !(e.hasta && e.hasta < hoyStr()) ? '<button class="btn sec2" type="button" style="margin-top:8px" onclick="abrirCambioEq(' + i + ')">Cambió el precio desde una fecha</button>' : '')) +
     '<button class="del" onclick="EQ.splice(' + i + ',1);renderEquipos();dirty()">Quitar equipo</button></div>').join('');
   EQ.forEach((e, i) => sumEq(i));
 }
 function sumEq(i) {
-  const e = EQ[i], tc = Number(document.querySelector('[data-k=TC]').value) || Number(CFG.TC) || 1, iva = Number(document.querySelector('[data-k=IVA]').value) || 0, dm = 30;
+  const e = EQ[i], tc = vigenteHoyEdit('TC') || Number(CFG.TC) || 1, iva = Number(document.querySelector('[data-k=IVA]').value) || 0, dm = 30;
   let usd = e.moneda === 'USD' ? Number(e.precio) : Number(e.precio) / tc; if (Number(e.conIva) === 1) usd = usd / (1 + iva);
   const el = document.getElementById('eqSum' + i); if (el) el.textContent = !(usd > 0) ? 'propio / sin costo' : e.cobro === 'DIA' ? '= ' + fmtUSD(usd) + ' por día trabajado' : '= ' + fmtUSD(usd) + '/mes · ' + fmtUSD(usd / dm) + '/día';
 }
-function renderFletes() {
-  const el = document.getElementById('fcList'); if (!el) return;
-  el.innerHTML = !FC.length ? '<div class="small">Sin cambios: rige el precio de arriba para toda la obra.</div>' : FC.map((c, i) => '<div class="row" style="margin-top:6px;align-items:flex-end">' +
-    '<div><label style="margin-top:0">Desde</label><input type="date" value="' + (c.desde || '') + '" onchange="FC[' + i + '].desde=this.value;dirty()"></div>' +
-    '<div><label style="margin-top:0">$ por viaje sin IVA</label><input type="number" inputmode="numeric" min="0" step="any" value="' + (c.ars === '' ? '' : c.ars) + '" oninput="FC[' + i + '].ars=this.value===\'\'?\'\':Number(this.value);dirty()"></div>' +
-    '<div style="flex:0 0 auto"><button class="del" style="border:0;background:none;color:var(--alerta);font-weight:600;font-size:13px;padding:10px 0" type="button" onclick="FC.splice(' + i + ',1);renderFletes();dirty()">Quitar</button></div></div>').join('');
+// Cambios por fecha de una clave: lista editable + valor vigente hoy
+function valorInicialEdit(k) { const i = document.querySelector('#cfgForm [data-k=' + k + ']'); return i ? Number(i.value) : Number(CFG[k]); }
+function vigenteHoyEdit(k) { let v = valorInicialEdit(k); (VG[k] || []).slice().filter(c => c.desde && c.v !== '').sort((a, b) => a.desde < b.desde ? -1 : 1).forEach(c => { if (hoyStr() >= c.desde) v = Number(c.v); }); return v; }
+function renderVig(k) {
+  const el = document.getElementById('vg-' + k); if (!el) return;
+  const l = VG[k] || [];
+  const nombre = (VIG_CAMPOS.find(x => x[0] === k) || [])[1] || k, fm = (VIG_CAMPOS.find(x => x[0] === k) || [])[2] || (v => v);
+  el.innerHTML = (!l.length ? '<div class="small">Sin cambios por fecha: el valor de arriba rige para toda la obra.</div>'
+    : '<div class="small" style="margin-top:6px">Cambios de ' + nombre.toLowerCase() + ' (cada día usa el valor vigente esa fecha; los días anteriores no cambian):</div>' +
+    l.map((c, i) => '<div class="row" style="margin-top:6px;align-items:flex-end">' +
+      '<div><label style="margin-top:0">Desde</label><input type="date" value="' + (c.desde || '') + '" onchange="VG[\'' + k + '\'][' + i + '].desde=this.value;renderVigHoy(\'' + k + '\');dirty()"></div>' +
+      '<div><label style="margin-top:0">Nuevo valor</label><input type="number" inputmode="decimal" min="0" step="any" value="' + (c.v === '' ? '' : c.v) + '" oninput="VG[\'' + k + '\'][' + i + '].v=this.value===\'\'?\'\':Number(this.value);renderVigHoy(\'' + k + '\');dirty()"></div>' +
+      '<div style="flex:0 0 auto"><button class="del" style="border:0;background:none;color:var(--alerta);font-weight:600;font-size:13px;padding:10px 0" type="button" onclick="VG[\'' + k + '\'].splice(' + i + ',1);renderVig(\'' + k + '\');dirty()">Quitar</button></div></div>').join('')) +
+    '<div class="small" id="vgh-' + k + '" style="margin-top:4px"></div>';
+  renderVigHoy(k);
+}
+function renderVigHoy(k) {
+  const el = document.getElementById('vgh-' + k); if (!el) return;
+  const fm = (VIG_CAMPOS.find(x => x[0] === k) || [])[2] || (v => v);
+  el.innerHTML = (VG[k] || []).length ? 'Vigente hoy: <b>' + fm(vigenteHoyEdit(k)) + '</b>' : '';
+}
+function agregarVig(k) {
+  if (!VG[k]) VG[k] = [];
+  VG[k].push({ desde: hoyStr(), v: vigenteHoyEdit(k) });
+  renderVig(k); dirty();
+  const ins = document.querySelectorAll('#vg-' + k + ' input[type=number]'); if (ins.length) { ins[ins.length - 1].focus(); ins[ins.length - 1].select(); }
+}
+// Equipos: cambio de precio desde una fecha = cierra este renglón el día anterior y abre otro con el precio nuevo
+function abrirCambioEq(i) { EQ[i]._cambio = { desde: hoyStr(), precio: '' }; renderEquipos(); const el = document.getElementById('eqc' + i); if (el) el.querySelector('input[type=number]').focus(); }
+function aplicarCambioEq(i) {
+  const e = EQ[i], c = e._cambio, desde = c.desde, precio = Number(c.precio);
+  if (!desde) return toast('Falta la fecha desde la que rige el precio nuevo', 'mal');
+  if (c.precio === '' || isNaN(precio) || precio < 0) return toast('Falta el precio nuevo', 'mal');
+  if (e.desde && desde <= e.desde) return toast('La fecha tiene que ser posterior al ' + fDiaL(e.desde) + ' (cuando empezó a contar este equipo)', 'mal');
+  if (e.hasta && desde > e.hasta) return toast('El equipo ya terminó el ' + fDiaL(e.hasta) + ': no puede cambiar de precio después', 'mal');
+  const nuevo = { equipo: e.equipo, precio, moneda: e.moneda, conIva: e.conIva, obs: e.obs || '', desde, hasta: e.hasta || '', cobro: e.cobro };
+  e.hasta = prevDia(desde); delete e._cambio;
+  EQ.splice(i + 1, 0, nuevo);
+  renderEquipos(); dirty();
+  toast('Listo: ' + e.equipo + ' cobra el precio anterior hasta el ' + fDiaL(e.hasta) + '. Tocá Guardar.', 'ok');
 }
 function agregarEquipo() { EQ.push({ equipo: '', precio: 0, moneda: 'ARS', conIva: 0, obs: '', desde: '', hasta: '', cobro: 'MES' }); renderEquipos(); dirty(); const l = document.querySelectorAll('.eq'); l[l.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' }); l[l.length - 1].querySelector('input').focus(); }
 function guardarConfig() {
   const config = {};
-  document.querySelectorAll('#cfgForm input').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) config[i.dataset.k] = i.value; });
-  if (JSON.stringify(FC) !== FC0) {
-    if (FC.some(c => !c.desde || !(Number(c.ars) > 0))) { toast('Cada cambio de flete necesita fecha y precio', 'mal'); return; }
-    config.FLETE_CAMBIOS = JSON.stringify(FC);
+  document.querySelectorAll('#cfgForm [data-k]').forEach(i => { if (String(i.value).trim() !== String(CFG[i.dataset.k] == null ? '' : CFG[i.dataset.k]).trim()) config[i.dataset.k] = i.value; });
+  // cambios por fecha: completos y sin fechas repetidas
+  const nombreK = k => (VIG_CAMPOS.find(x => x[0] === k) || [])[1] || k;
+  for (const k of VIG_KEYS) {
+    const l = VG[k] || [];
+    const pos = ['PRECIO_T', 'TC', 'CAP_CAMION'].includes(k);
+    if (l.some(c => !c.desde || c.v === '' || isNaN(Number(c.v)) || Number(c.v) < 0 || (pos && !(Number(c.v) > 0)))) { toast('Cada cambio de ' + nombreK(k).toLowerCase() + ' necesita fecha y valor', 'mal'); return; }
+    const fs = l.map(c => c.desde).sort(); for (let i = 1; i < fs.length; i++) if (fs[i] === fs[i - 1]) { toast('Hay dos cambios de ' + nombreK(k).toLowerCase() + ' con la misma fecha', 'mal'); return; }
   }
+  // POKAYOKE: corregir un valor sin fecha cambia toda la obra para atrás
+  const retro = VIG_KEYS.filter(k => config[k] !== undefined).map(nombreK)
+    .concat(EQ.filter(e => e._p0 && (Number(e.precio) !== e._p0.precio || e.moneda !== e._p0.moneda || Number(e.conIva) !== e._p0.conIva || e.cobro !== e._p0.cobro)).map(e => 'precio de ' + e.equipo));
+  if (retro.length && !confirm('Cambiaste sin fecha: ' + retro.join(', ') + '.\n\nEso recalcula TODA la obra desde el primer día, también los días ya cerrados.\n\nSi el cambio rige desde una fecha, tocá Cancelar y usá "+ Cambio desde una fecha" (o "Cambió el precio desde una fecha" en el equipo).\n\n¿Corregir toda la obra?')) return;
   if (config.PIN !== undefined && !confirm('¿Cambiar el PIN de acceso? Todos van a tener que volver a entrar con el nuevo.')) return;
+  const payload = { config, equipos: JSON.parse(eqJSON()) };
+  if (vgJSON() !== VG0) payload.vigencias = JSON.parse(vgJSON());
   const b = document.getElementById('bCfg'); b.disabled = true; b.textContent = 'Guardando…';
-  api('guardarConfig', { config, equipos: EQ }, true).then(r => {
+  api('guardarConfig', payload, true).then(r => {
     CFG = null;
     toast('Costos guardados', 'ok');
     if (config.PIN !== undefined && CRED && CRED.pin) { CRED.pin = String(config.PIN).trim(); localStorage.setItem('autovias_cred', JSON.stringify(CRED)); }
@@ -643,18 +729,21 @@ function preview() {
   if (!D) return;
   const t = Number(document.getElementById('fT').value) || 0;
   const vIn = document.getElementById('fV').value;
-  const viajes = vIn === '' ? Math.ceil(t / D.cfg.CAP) : Number(vIn);
-  document.getElementById('fV').placeholder = 'auto: ' + Math.ceil(t / D.cfg.CAP);
-  const fijos = jornada ? D.base.fijoDia - (t > 0 ? 0 : (D.base.equiposPorJornada || 0)) : 0;
+  const fIn = document.getElementById('fFecha').value || D.hoy;
+  // valores vigentes en la fecha que se carga
+  const CAP = vEn('CAP_CAMION', fIn), TC = vEn('TC', fIn), b = D.base;
+  const viajes = vIn === '' ? Math.ceil(t / CAP) : Number(vIn);
+  document.getElementById('fV').placeholder = 'auto: ' + Math.ceil(t / CAP);
+  const fijos = jornada ? b.fijoDia - (t > 0 ? 0 : (b.equiposPorJornada || 0)) : 0;
   const cIn = document.getElementById('fComb').value;
-  const fIn = document.getElementById('fFecha').value;
   const conReal = !!(D.cfg.COMB_DESDE && fIn >= D.cfg.COMB_DESDE);
-  const comb = cIn !== '' ? Number(cIn) / (D.cfg.COMB_CON_IVA ? 1 + D.cfg.IVA : 1) / D.cfg.TC : (jornada && !conReal ? D.base.combEstUSD : 0);
-  const flete = viajes * (fIn ? fleteARSEn(D.base, fIn) / D.cfg.TC : D.base.fleteUSD), puntas = t * D.base.puntasPorT;
-  const costo = fijos + comb + flete + puntas, fact = t * D.cfg.PRECIO_T, u = fact - costo;
+  const comb = cIn !== '' ? Number(cIn) / (D.cfg.COMB_CON_IVA ? 1 + D.cfg.IVA : 1) / TC : (jornada && !conReal ? vEn('COMB_ESTIMADO_ARS', fIn) / TC : 0);
+  const puntasPorT = b.sobrefresado ? vEn('PUNTAS_PRECIO_ARS', fIn) / (1 + D.cfg.IVA) / TC / b.vidaPuntas * b.sobrefresado : b.puntasPorT;
+  const flete = viajes * fleteARSEn(b, fIn) / TC, puntas = t * puntasPorT;
+  const costo = fijos + comb + flete + puntas, fact = t * vEn('PRECIO_T', fIn), u = fact - costo;
   const f = document.getElementById('fFecha').value;
   const existe = D.serie.find(x => x.fecha === f);
-  let resto = t % D.cfg.CAP;
+  let resto = t % CAP;
   let advFlete = (t > 0 && resto > 0 && resto <= 5 && vIn === '') ? '<br>⚠ Con ' + t + ' t pagás ' + viajes + ' viajes: el último lleva solo ' + fmtN(resto,1) + ' t.' : '';
   document.getElementById('prev').innerHTML =
     (existe && !existe.planta ? '<b>Ya hay carga para esta fecha (' + fmtN(existe.t,1) + ' t). Al guardar se reemplaza.</b><br>' : '') +
